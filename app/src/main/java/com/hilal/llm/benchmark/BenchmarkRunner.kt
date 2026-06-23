@@ -9,6 +9,7 @@ class BenchmarkRunner(
         onComplete: (BenchmarkResult) -> Unit
     ) {
         val startedAt = System.currentTimeMillis()
+        val initialRamSnapshot = RamUsageReader.readSnapshot()
         var firstTokenTimeMs: Long? = null
         val responseBuilder = StringBuilder()
 
@@ -30,7 +31,10 @@ class BenchmarkRunner(
                     val totalTimeMs = System.currentTimeMillis() - startedAt
                     val response = responseBuilder.toString()
                     val tokenCount = estimateTokenCount(response)
+                    val finalRamSnapshot = RamUsageReader.readSnapshot()
+                    logRamSnapshot(initialRamSnapshot, finalRamSnapshot)
                     val result = BenchmarkResult(
+                        modelId = request.modelId,
                         modelName = request.modelName,
                         modelFilePath = request.modelFilePath,
                         prompt = request.prompt,
@@ -39,7 +43,14 @@ class BenchmarkRunner(
                         totalTimeMs = totalTimeMs,
                         tokenCount = tokenCount,
                         tokensPerSecond = calculateTokensPerSecond(tokenCount, totalTimeMs),
-                        errorMessage = null
+                        errorMessage = null,
+                        selectionSource = request.selectionSource,
+                        runtimeType = request.runtimeType,
+                        engineType = request.engineType,
+                        promptTemplateType = request.promptTemplateType,
+                        totalRamMb = finalRamSnapshot?.totalRamMb,
+                        nativeRamMb = finalRamSnapshot?.nativeRamMb,
+                        javaRamMb = finalRamSnapshot?.javaRamMb
                     )
                     onComplete(result)
                 }
@@ -48,7 +59,10 @@ class BenchmarkRunner(
                     val totalTimeMs = System.currentTimeMillis() - startedAt
                     val response = responseBuilder.toString()
                     val tokenCount = estimateTokenCount(response)
+                    val finalRamSnapshot = RamUsageReader.readSnapshot()
+                    logRamSnapshot(initialRamSnapshot, finalRamSnapshot)
                     val result = BenchmarkResult(
+                        modelId = request.modelId,
                         modelName = request.modelName,
                         modelFilePath = request.modelFilePath,
                         prompt = request.prompt,
@@ -57,11 +71,31 @@ class BenchmarkRunner(
                         totalTimeMs = totalTimeMs,
                         tokenCount = tokenCount,
                         tokensPerSecond = calculateTokensPerSecond(tokenCount, totalTimeMs),
-                        errorMessage = throwable.message ?: "Unknown generation error"
+                        errorMessage = throwable.message ?: "Unknown generation error",
+                        selectionSource = request.selectionSource,
+                        runtimeType = request.runtimeType,
+                        engineType = request.engineType,
+                        promptTemplateType = request.promptTemplateType,
+                        totalRamMb = finalRamSnapshot?.totalRamMb,
+                        nativeRamMb = finalRamSnapshot?.nativeRamMb,
+                        javaRamMb = finalRamSnapshot?.javaRamMb
                     )
                     onComplete(result)
                 }
             }
         )
+    }
+
+    private fun logRamSnapshot(initial: RamSnapshot?, final: RamSnapshot?) {
+        if (final == null) return
+        android.util.Log.d(
+            TAG,
+            "RAM initial(java=${initial?.javaRamMb ?: "-"}MB, native=${initial?.nativeRamMb ?: "-"}MB, total=${initial?.totalRamMb ?: "-"}MB) " +
+                "final(java=${final.javaRamMb}MB, native=${final.nativeRamMb}MB, total=${final.totalRamMb}MB)"
+        )
+    }
+
+    private companion object {
+        private const val TAG = "BenchmarkRunner"
     }
 }

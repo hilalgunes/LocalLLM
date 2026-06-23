@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
@@ -32,6 +33,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -39,9 +41,17 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hilal.llm.benchmark.BenchmarkResult
+import com.hilal.llm.benchmark.BenchmarkPresetRepository
 import com.hilal.llm.benchmark.BenchmarkUiState
 import com.hilal.llm.benchmark.BenchmarkViewModel
 import com.hilal.llm.benchmark.EngineType
+import com.hilal.llm.benchmark.ResponseQuality
+import com.hilal.llm.benchmark.displayLabel
+import com.hilal.llm.catalog.BenchmarkModelSelection
+import com.hilal.llm.catalog.RuntimeType
+import com.hilal.llm.benchmark.history.BenchmarkHistoryActivity
+import com.hilal.llm.catalog.ui.ModelCatalogActivity
+import com.hilal.llm.rag.RagActivity
 import com.hilal.llm.ui.theme.LLMTheme
 
 class MainActivity : ComponentActivity() {
@@ -83,6 +93,13 @@ class MainActivity : ComponentActivity() {
             viewModel.onTokenizerFileSelected(displayName = displayName, uri = uri.toString())
         }
 
+    private val catalogLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode != Activity.RESULT_OK) return@registerForActivityResult
+            val selection = BenchmarkModelSelection.fromIntent(result.data) ?: return@registerForActivityResult
+            viewModel.onCatalogModelSelected(selection)
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         viewModel.initializeLlamaEngine(
@@ -101,6 +118,7 @@ class MainActivity : ComponentActivity() {
             appContext = applicationContext,
             contentResolver = contentResolver
         )
+        viewModel.initializeBenchmarkHistoryRepository(applicationContext)
         enableEdgeToEdge()
         setContent {
             LLMTheme {
@@ -109,12 +127,19 @@ class MainActivity : ComponentActivity() {
                     BenchmarkScreen(
                         uiState = uiState,
                         onEngineSelected = viewModel::setEngine,
+                        onPresetSelected = viewModel::selectPreset,
                         onSelectModelFile = ::openModelPicker,
                         onSelectTokenizerFile = ::openTokenizerPicker,
                         onMaxTokensChanged = viewModel::updateMaxTokensInput,
                         onPromptChanged = viewModel::updatePrompt,
                         onRunBenchmark = viewModel::runBenchmark,
                         onClear = viewModel::clear,
+                        onQualityChanged = viewModel::updateDraftResponseQuality,
+                        onQualityNoteChanged = viewModel::updateDraftQualityNote,
+                        onSaveQuality = viewModel::saveLatestResultQuality,
+                        onOpenCatalog = ::openModelCatalog,
+                        onOpenHistory = ::openBenchmarkHistory,
+                        onOpenRag = ::openRagPage,
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
@@ -128,6 +153,18 @@ class MainActivity : ComponentActivity() {
 
     private fun openTokenizerPicker() {
         openDocumentPicker(tokenizerPickerLauncher)
+    }
+
+    private fun openModelCatalog() {
+        catalogLauncher.launch(Intent(this, ModelCatalogActivity::class.java))
+    }
+
+    private fun openBenchmarkHistory() {
+        startActivity(Intent(this, BenchmarkHistoryActivity::class.java))
+    }
+
+    private fun openRagPage() {
+        startActivity(Intent(this, RagActivity::class.java))
     }
 
     private fun openDocumentPicker(
@@ -161,20 +198,44 @@ class MainActivity : ComponentActivity() {
 private fun BenchmarkScreen(
     uiState: BenchmarkUiState,
     onEngineSelected: (EngineType) -> Unit,
+    onPresetSelected: (String) -> Unit,
     onSelectModelFile: () -> Unit,
     onSelectTokenizerFile: () -> Unit,
     onMaxTokensChanged: (String) -> Unit,
     onPromptChanged: (String) -> Unit,
     onRunBenchmark: () -> Unit,
     onClear: () -> Unit,
+    onQualityChanged: (ResponseQuality) -> Unit,
+    onQualityNoteChanged: (String) -> Unit,
+    onSaveQuality: () -> Unit,
+    onOpenCatalog: () -> Unit,
+    onOpenHistory: () -> Unit,
+    onOpenRag: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val presetRepository = remember { BenchmarkPresetRepository() }
+    val presets = remember { presetRepository.getAvailablePresets() }
+
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = onOpenCatalog) {
+                        Text("Open Model Catalog")
+                    }
+                    TextButton(onClick = onOpenHistory) {
+                        Text("Open History")
+                    }
+                    TextButton(onClick = onOpenRag) {
+                        Text("Open RAG")
+                    }
+                }
+            }
+
         item {
             Text(
                 text = "Local LLM Benchmark",
@@ -214,16 +275,49 @@ private fun BenchmarkScreen(
                     Button(onClick = onSelectTokenizerFile) {
                         Text("Select Tokenizer File")
                     }
-                    Text(
-                        text = uiState.selectedModel?.let {
-                            "Model: ${it.modelName}\nModel Uri: ${it.modelFilePath}\nTokenizer: ${it.tokenizerName ?: "-"}\nTokenizer Uri: ${it.tokenizerFilePath ?: "-"}"
-                        } ?: "No model selected"
-                    )
+                    SelectedModelSummary(uiState = uiState)
                     if (!uiState.modelWarningMessage.isNullOrBlank()) {
                         Text(
                             text = "Warning: ${uiState.modelWarningMessage}",
                             color = MaterialTheme.colorScheme.tertiary
                         )
+                    }
+                }
+            }
+        }
+
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Benchmark Presets", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        text = "Preset: ${uiState.selectedPreset?.title ?: "Custom"}",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        item {
+                            PresetChip(
+                                title = "Custom",
+                                description = "Manual prompt",
+                                selected = uiState.selectedPreset == null,
+                                onClick = {
+                                    onPresetSelected("")
+                                }
+                            )
+                        }
+                        items(presets, key = { it.id }) { preset ->
+                            PresetChip(
+                                title = preset.title,
+                                description = preset.description,
+                                selected = uiState.selectedPreset?.id == preset.id,
+                                onClick = { onPresetSelected(preset.id) }
+                            )
+                        }
                     }
                 }
             }
@@ -282,8 +376,10 @@ private fun BenchmarkScreen(
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text("Result", style = MaterialTheme.typography.titleMedium)
-                    Text("Engine: ${uiState.selectedEngineType.label}")
-                    Text("Max tokens: ${uiState.maxTokensInput}")
+            Text("Engine: ${uiState.selectedEngineType.label}")
+            Text("Max tokens: ${uiState.maxTokensInput}")
+                    SelectedModelSummary(uiState = uiState)
+                    Text("Preset: ${uiState.selectedPreset?.title ?: "Custom"}")
                     Text("Response: ${uiState.response.ifBlank { "-" }}")
                     Text("First token time: ${uiState.firstTokenTimeMs?.let { "$it ms" } ?: "-"}")
                     Text("Total time: ${uiState.totalTimeMs?.let { "$it ms" } ?: "-"}")
@@ -293,6 +389,10 @@ private fun BenchmarkScreen(
                             uiState.tokensPerSecond?.let { String.format("%.2f", it) } ?: "-"
                         }"
                     )
+                    val latestResult = uiState.completedResults.firstOrNull()
+                    Text("RAM: ${latestResult?.totalRamMb?.let { String.format("%.2f MB", it) } ?: "-"}")
+                    Text("Native RAM: ${latestResult?.nativeRamMb?.let { String.format("%.2f MB", it) } ?: "-"}")
+                    Text("Java RAM: ${latestResult?.javaRamMb?.let { String.format("%.2f MB", it) } ?: "-"}")
                     if (!uiState.errorMessage.isNullOrBlank()) {
                         Text(
                             text = "Error: ${uiState.errorMessage}",
@@ -300,6 +400,19 @@ private fun BenchmarkScreen(
                         )
                     }
                 }
+            }
+        }
+
+        uiState.completedResults.firstOrNull()?.let { latestResult ->
+            item {
+                QualityRatingSection(
+                    result = latestResult,
+                    selectedQuality = uiState.draftResponseQuality,
+                    qualityNote = uiState.draftQualityNote,
+                    onQualityChanged = onQualityChanged,
+                    onQualityNoteChanged = onQualityNoteChanged,
+                    onSaveQuality = onSaveQuality
+                )
             }
         }
 
@@ -314,6 +427,41 @@ private fun BenchmarkScreen(
                 CompletedResultItem(result = result)
             }
         }
+    }
+}
+
+@Composable
+private fun SelectedModelSummary(uiState: BenchmarkUiState) {
+    val selectedCatalogModel = uiState.selectedCatalogModel
+    val selectedModel = uiState.selectedModel
+    val runtimeLabel = when {
+        selectedCatalogModel != null -> selectedCatalogModel.runtimeType.displayName()
+        uiState.selectedEngineType == EngineType.EXECUTORCH -> "ExecuTorch"
+        uiState.selectedEngineType == EngineType.LITERT -> "LiteRT"
+        uiState.selectedEngineType == EngineType.LLAMA_CPP -> "llama.cpp"
+        else -> "Manual"
+    }
+    val engineLabel = selectedCatalogModel?.engineType?.name ?: uiState.selectedEngineType.label
+    val promptTemplateLabel = selectedCatalogModel?.promptTemplateType?.name ?: "-"
+    val mainModelFile = selectedCatalogModel?.modelPath ?: selectedModel?.modelFilePath ?: "-"
+    val tokenizerFile = selectedCatalogModel?.tokenizerPath ?: selectedModel?.tokenizerFilePath ?: "-"
+    val modelName = selectedCatalogModel?.displayName ?: selectedModel?.modelName ?: "No model selected"
+
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text("Model: $modelName")
+        Text("Runtime: $runtimeLabel")
+        Text("Engine: $engineLabel")
+        Text("Prompt template: $promptTemplateLabel")
+        Text("Main model file: $mainModelFile")
+        Text("Tokenizer file: $tokenizerFile")
+    }
+}
+
+private fun RuntimeType.displayName(): String {
+    return when (this) {
+        RuntimeType.EXECUTORCH -> "ExecuTorch"
+        RuntimeType.LITERT -> "LiteRT"
+        RuntimeType.LLAMA_CPP -> "llama.cpp"
     }
 }
 
@@ -334,6 +482,9 @@ private fun CompletedResultItem(result: BenchmarkResult) {
             Text("First token: ${result.firstTokenTimeMs?.let { "$it ms" } ?: "-"}")
             Text("Tokens: ${result.tokenCount}")
             Text("TPS: ${result.tokensPerSecond?.let { String.format("%.2f", it) } ?: "-"}")
+            Text("RAM: ${result.totalRamMb?.let { String.format("%.2f MB", it) } ?: "-"}")
+            Text("Native RAM: ${result.nativeRamMb?.let { String.format("%.2f MB", it) } ?: "-"}")
+            Text("Java RAM: ${result.javaRamMb?.let { String.format("%.2f MB", it) } ?: "-"}")
             if (!result.errorMessage.isNullOrBlank()) {
                 HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
                 Text(
@@ -352,12 +503,101 @@ fun BenchmarkScreenPreview() {
         BenchmarkScreen(
             uiState = BenchmarkUiState(),
             onEngineSelected = {},
+            onPresetSelected = {},
             onSelectModelFile = {},
             onSelectTokenizerFile = {},
             onMaxTokensChanged = {},
             onPromptChanged = {},
             onRunBenchmark = {},
-            onClear = {}
+            onClear = {},
+            onQualityChanged = {},
+            onQualityNoteChanged = {},
+            onSaveQuality = {},
+            onOpenCatalog = {},
+            onOpenHistory = {},
+            onOpenRag = {}
         )
+    }
+}
+
+@Composable
+private fun PresetChip(
+    title: String,
+    description: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    if (selected) {
+        Button(onClick = onClick) {
+            Column {
+                Text(title)
+                Text(description, style = MaterialTheme.typography.labelSmall)
+            }
+        }
+    } else {
+        TextButton(onClick = onClick) {
+            Column {
+                Text(title)
+                Text(description, style = MaterialTheme.typography.labelSmall)
+            }
+        }
+    }
+}
+
+@Composable
+private fun QualityRatingSection(
+    result: BenchmarkResult,
+    selectedQuality: ResponseQuality,
+    qualityNote: String,
+    onQualityChanged: (ResponseQuality) -> Unit,
+    onQualityNoteChanged: (String) -> Unit,
+    onSaveQuality: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("Response Quality", style = MaterialTheme.typography.titleMedium)
+            Text("Current: ${result.responseQuality.displayLabel()}")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                QualityChip("Good", selectedQuality == ResponseQuality.GOOD) { onQualityChanged(ResponseQuality.GOOD) }
+                QualityChip("Partial", selectedQuality == ResponseQuality.PARTIAL) { onQualityChanged(ResponseQuality.PARTIAL) }
+                QualityChip("Bad", selectedQuality == ResponseQuality.BAD) { onQualityChanged(ResponseQuality.BAD) }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                QualityChip("Repeated", selectedQuality == ResponseQuality.REPEATED) { onQualityChanged(ResponseQuality.REPEATED) }
+                QualityChip("Empty", selectedQuality == ResponseQuality.EMPTY) { onQualityChanged(ResponseQuality.EMPTY) }
+                QualityChip("Not rated", selectedQuality == ResponseQuality.UNKNOWN) { onQualityChanged(ResponseQuality.UNKNOWN) }
+            }
+            OutlinedTextField(
+                value = qualityNote,
+                onValueChange = onQualityNoteChanged,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Quality note (optional)") }
+            )
+            TextButton(onClick = onSaveQuality) {
+                Text("Save Quality")
+            }
+        }
+    }
+}
+
+@Composable
+private fun QualityChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    if (selected) {
+        Button(onClick = onClick) {
+            Text(label)
+        }
+    } else {
+        TextButton(onClick = onClick) {
+            Text(label)
+        }
     }
 }

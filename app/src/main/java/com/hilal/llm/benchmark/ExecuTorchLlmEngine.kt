@@ -9,7 +9,9 @@ import java.io.File
 import java.io.FileOutputStream
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
+import com.hilal.llm.catalog.PromptTemplateType
 import org.pytorch.executorch.Module
 import org.pytorch.executorch.extension.llm.LlmCallback
 import org.pytorch.executorch.extension.llm.LlmGenerationConfig
@@ -23,12 +25,6 @@ class ExecuTorchLlmEngine(
         val trimmedText: String,
         val matchedToken: String?
     )
-
-    private enum class ChatModelType {
-        QWEN,
-        GEMMA,
-        GENERIC
-    }
 
     companion object {
         private const val TAG = "ExecuTorchLlmEngine"
@@ -52,6 +48,7 @@ class ExecuTorchLlmEngine(
     ) {
         var llmModule: LlmModule? = null
         var firstTokenSeen = false
+        val generationFinished = kotlinx.coroutines.CompletableDeferred<Unit>()
         recentTokens.clear()
         repetitionStrikes = 0
         try {
@@ -76,17 +73,26 @@ class ExecuTorchLlmEngine(
                 LlmModule(modelPath, tokenizerPath, DEFAULT_TEMPERATURE)
             }
 
-            val modelType = detectModelType(request.modelName, request.modelFilePath)
-            val formattedPrompt = formatPrompt(request.prompt, modelType)
+            val promptTemplateType = resolvePromptTemplateType(
+                promptTemplateType = request.promptTemplateType,
+                modelName = request.modelName,
+                modelPath = request.modelFilePath,
+                engineType = request.engineType
+            )
+            val formattedPrompt = formatPrompt(request.prompt, promptTemplateType)
+            val stopTokens = stopTokensFor(promptTemplateType)
             val generationConfig = buildGenerationConfig(
                 prompt = formattedPrompt,
-                modelType = modelType,
+                promptTemplateType = promptTemplateType,
                 maxNewTokens = request.maxTokens
             )
-            val temperature = generationTemperature(modelType)
+            val temperature = generationTemperature(promptTemplateType)
             Log.d(
                 TAG,
-                "Generation config modelName=${request.modelName} modelType=$modelType " +
+                "Generation config modelName=${request.modelName} " +
+                    "modelDisplayName=${request.modelDisplayName ?: "-"} " +
+                    "engineType=${request.engineType ?: "-"} " +
+                    "promptTemplateType=$promptTemplateType " +
                     "maxTokens=${request.maxTokens} promptChars=${request.prompt.length} " +
                     "formattedPromptChars=${formattedPrompt.length} seqLen=${generationConfig.seqLen} " +
                     "temperature=$temperature"
@@ -117,11 +123,26 @@ class ExecuTorchLlmEngine(
                                 Log.d(TAG, "First token emitted")
                                 callback.onFirstToken()
                             }
-                            Log.v(TAG, "Emitting raw chunkLen=${result.length} rawPreview=${previewForLog(result)}")
                             callback.onToken(result)
+                            recentTokens.addLast(result)
+                            while (recentTokens.size > 20) {
+                                recentTokens.removeFirst()
+                            }
+                        }
+
+                        override fun onStats(stats: String) {
+                            Log.v(TAG, "ExecuTorch stats=$stats")
+                            if (!generationFinished.isCompleted) {
+                                generationFinished.complete(Unit)
+                            }
                         }
                     }
                 ) as Int
+            }
+            if (!generationFinished.isCompleted) {
+                withTimeoutOrNull(2_000L) {
+                    generationFinished.await()
+                }
             }
             if (exitCode != 0) {
                 Log.e(TAG, "ExecuTorch generate() returned non-zero exitCode=$exitCode")
@@ -146,7 +167,7 @@ class ExecuTorchLlmEngine(
                     append("ExecuTorch finished without emitting tokens.")
                     append(" The model may not expose a compatible LLM method")
                     append(" or the export may be incomplete.")
-                    append(" modelType=").append(modelType)
+                    append(" promptTemplateType=").append(promptTemplateType)
                     append(" modelName=").append(request.modelName)
                     append(" modelPath=").append(request.modelFilePath)
                     append(" availableMethods=").append(availableMethods)
@@ -295,11 +316,30 @@ class ExecuTorchLlmEngine(
         }
     }
 
-    private fun formatPrompt(rawPrompt: String, modelType: ChatModelType): String {
-        return when (modelType) {
-            ChatModelType.QWEN -> formatPromptForQwen(rawPrompt)
-            ChatModelType.GEMMA -> formatPromptForGemma(rawPrompt)
-            ChatModelType.GENERIC -> rawPrompt.trim()
+    private fun resolvePromptTemplateType(
+        promptTemplateType: PromptTemplateType?,
+        modelName: String,
+        modelPath: String,
+        engineType: com.hilal.llm.catalog.EngineType?
+    ): PromptTemplateType {
+        val detected = promptTemplateType ?: detectPromptTemplateType(modelName, modelPath)
+        if (detected != PromptTemplateType.GENERIC) {
+            return detected
+        }
+
+        return when (engineType) {
+            com.hilal.llm.catalog.EngineType.EXECUTORCH_GENERATE -> PromptTemplateType.GEMMA
+            else -> PromptTemplateType.GENERIC
+        }
+    }
+
+    private fun formatPrompt(rawPrompt: String, templateType: PromptTemplateType): String {
+        return when (templateType) {
+            PromptTemplateType.QWEN -> formatPromptForQwen(rawPrompt)
+            PromptTemplateType.GEMMA -> formatPromptForGemma(rawPrompt)
+            PromptTemplateType.PHI -> formatPromptForPhi(rawPrompt)
+            PromptTemplateType.LLAMA -> formatPromptForLlama(rawPrompt)
+            PromptTemplateType.GENERIC -> rawPrompt.trim()
         }
     }
 
@@ -321,21 +361,47 @@ $cleaned
         return "<start_of_turn>user\n$cleaned\n<end_of_turn>\n<start_of_turn>model\n"
     }
 
-    private fun generationTemperature(modelType: ChatModelType): Float {
-        return when (modelType) {
-            ChatModelType.QWEN -> QWEN_TEMPERATURE
-            ChatModelType.GEMMA -> GEMMA_TEMPERATURE
-            ChatModelType.GENERIC -> GENERIC_TEMPERATURE
+    private fun formatPromptForPhi(rawPrompt: String): String {
+        val cleaned = rawPrompt.trim()
+        return """
+<|system|>
+You are a helpful assistant. Answer briefly and directly.
+<|user|>
+/no_think
+$cleaned
+<|assistant|>
+""".trimStart()
+    }
+
+    private fun formatPromptForLlama(rawPrompt: String): String {
+        val cleaned = rawPrompt.trim()
+        return """
+<s>[INST] <<SYS>>
+You are a helpful assistant. Answer briefly and directly.
+<</SYS>>
+
+/no_think
+$cleaned [/INST]
+""".trimStart()
+    }
+
+    private fun generationTemperature(templateType: PromptTemplateType): Float {
+        return when (templateType) {
+            PromptTemplateType.QWEN -> QWEN_TEMPERATURE
+            PromptTemplateType.GEMMA -> GEMMA_TEMPERATURE
+            PromptTemplateType.PHI -> GENERIC_TEMPERATURE
+            PromptTemplateType.LLAMA -> GENERIC_TEMPERATURE
+            PromptTemplateType.GENERIC -> GENERIC_TEMPERATURE
         }
     }
 
     private fun buildGenerationConfig(
         prompt: String,
-        modelType: ChatModelType,
+        promptTemplateType: PromptTemplateType,
         maxNewTokens: Int
     ): LlmGenerationConfig {
         val seqLen = estimateSeqLen(prompt, maxNewTokens)
-        val temperature = generationTemperature(modelType)
+        val temperature = generationTemperature(promptTemplateType)
         return LlmGenerationConfig.create()
             .echo(false)
             .maxNewTokens(maxNewTokens)
@@ -358,12 +424,24 @@ $cleaned
         return ((compact.length / 4.0f).toInt() + 1).coerceAtLeast(1)
     }
 
-    private fun detectModelType(modelName: String, modelPath: String): ChatModelType {
+    private fun detectPromptTemplateType(modelName: String, modelPath: String): PromptTemplateType {
         val key = "$modelName $modelPath".lowercase()
         return when {
-            "qwen" in key -> ChatModelType.QWEN
-            "gemma" in key -> ChatModelType.GEMMA
-            else -> ChatModelType.GENERIC
+            "qwen" in key -> PromptTemplateType.QWEN
+            "gemma" in key -> PromptTemplateType.GEMMA
+            "phi" in key -> PromptTemplateType.PHI
+            "llama" in key -> PromptTemplateType.LLAMA
+            else -> PromptTemplateType.GENERIC
+        }
+    }
+
+    private fun stopTokensFor(templateType: PromptTemplateType): List<String> {
+        return when (templateType) {
+            PromptTemplateType.QWEN -> listOf("<|im_end|>", "<|endoftext|>", "<|im_start|>")
+            PromptTemplateType.GEMMA -> listOf("<end_of_turn>", "<start_of_turn>user", "<start_of_turn>model")
+            PromptTemplateType.PHI,
+            PromptTemplateType.LLAMA,
+            PromptTemplateType.GENERIC -> listOf("</s>", "<|endoftext|>", "<eos>", "<|eot_id|>")
         }
     }
 

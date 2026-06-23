@@ -41,10 +41,10 @@ class LiteRtLlmEngine(
 
         try {
             val modelPath = prepareModelPath(request.modelFilePath)
-            if (!modelPath.endsWith(".litertlm", ignoreCase = true)) {
+            if (!isSupportedModelFormat(modelPath)) {
                 callback.onError(
                     IllegalArgumentException(
-                        "LiteRT engine requires a .litertlm model file."
+                        "Selected LiteRT model format is not supported by current LiteRT runner."
                     )
                 )
                 return
@@ -184,6 +184,15 @@ class LiteRtLlmEngine(
         if (file.length() <= 0L) {
             throw IllegalArgumentException("Model file is empty (0 bytes): ${file.absolutePath}")
         }
+    }
+
+    private fun isSupportedModelFormat(modelPath: String): Boolean {
+        val normalized = modelPath.lowercase()
+        return normalized.endsWith(".litertlm") ||
+            normalized.endsWith(".task") ||
+            normalized.endsWith(".tflite") ||
+            normalized.endsWith(".zip") ||
+            normalized.endsWith(".bundle")
     }
 
     private fun readDisplayName(uri: Uri): String? {

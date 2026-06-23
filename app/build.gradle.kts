@@ -21,6 +21,11 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     ndkVersion = "27.0.12077973"
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+        }
+    }
     splits {
         abi {
             isEnable = true
@@ -63,6 +68,7 @@ dependencies {
     implementation(libs.litertlm.android)
     implementation(libs.mediapipe.tasks.genai)
     implementation(libs.executorch.android)
+    implementation(libs.pdfbox.android)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

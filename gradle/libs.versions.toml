@@ -9,9 +9,10 @@ activityCompose = "1.13.0"
 kotlin = "2.2.10"
 composeBom = "2024.09.00"
 llamacppKotlin = "0.4.0"
-liteRtLmAndroid = "0.11.0"
+liteRtLmAndroid = "0.13.1"
 mediaPipeGenAi = "0.10.27"
 executorchAndroid = "1.2.0"
+pdfboxAndroid = "2.0.27.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -34,6 +35,7 @@ llamacpp-kotlin = { group = "io.github.ljcamargo", name = "llamacpp-kotlin", ver
 litertlm-android = { group = "com.google.ai.edge.litertlm", name = "litertlm-android", version.ref = "liteRtLmAndroid" }
 mediapipe-tasks-genai = { group = "com.google.mediapipe", name = "tasks-genai", version.ref = "mediaPipeGenAi" }
 executorch-android = { group = "org.pytorch", name = "executorch-android", version.ref = "executorchAndroid" }
+pdfbox-android = { group = "com.tom-roush", name = "pdfbox-android", version.ref = "pdfboxAndroid" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

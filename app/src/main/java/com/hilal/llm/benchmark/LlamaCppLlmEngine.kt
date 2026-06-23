@@ -89,7 +89,7 @@ class LlamaCppLlmEngine(
             withContext(Dispatchers.IO) {
                 // Binding exposes partial streaming via emit_partial_completion.
                 llamaHelper.predict(
-                    withTemperatureHint(request.prompt, DEFAULT_TEMPERATURE),
+                    request.prompt,
                     null,
                     true
                 )
@@ -227,10 +227,6 @@ class LlamaCppLlmEngine(
             raw.isNotBlank() -> "Native runtime error: ${throwable.message}"
             else -> "Unknown runtime error."
         }
-    }
-
-    private fun withTemperatureHint(prompt: String, temperature: Double): String {
-        return "$prompt\n\n[temperature=$temperature]"
     }
 
     private fun validateLocalModelFile(file: File) {

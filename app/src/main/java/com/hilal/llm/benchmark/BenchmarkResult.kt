@@ -1,7 +1,12 @@
 package com.hilal.llm.benchmark
 
+import com.hilal.llm.catalog.EngineType as CatalogEngineType
+import com.hilal.llm.catalog.PromptTemplateType
+import com.hilal.llm.catalog.RuntimeType
+
 data class BenchmarkResult(
     val engineName: String = EngineType.FAKE.label,
+    val modelId: String? = null,
     val modelName: String,
     val modelFilePath: String,
     val maxTokens: Int = 512,
@@ -12,7 +17,19 @@ data class BenchmarkResult(
     val tokenCount: Int = estimateTokenCount(response),
     val tokensPerSecond: Double? = calculateTokensPerSecond(tokenCount, totalTimeMs),
     val errorMessage: String? = null,
-    val createdAt: Long = System.currentTimeMillis()
+    val selectionSource: SelectionSource = SelectionSource.MANUAL,
+    val presetId: String? = null,
+    val presetTitle: String? = null,
+    val createdAt: Long = System.currentTimeMillis(),
+    val resultId: String = createdAt.toString(),
+    val responseQuality: ResponseQuality = ResponseQuality.UNKNOWN,
+    val qualityNote: String? = null,
+    val runtimeType: RuntimeType? = null,
+    val engineType: CatalogEngineType? = null,
+    val promptTemplateType: PromptTemplateType? = null,
+    val totalRamMb: Double? = null,
+    val nativeRamMb: Double? = null,
+    val javaRamMb: Double? = null,
 ) {
     val isSuccess: Boolean
         get() = errorMessage.isNullOrBlank()
