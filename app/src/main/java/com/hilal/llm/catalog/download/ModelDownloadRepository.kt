@@ -28,9 +28,12 @@ class ModelDownloadRepository(
             for (fileConfig in config.files) {
                 currentCoroutineContext().ensureActive()
                 val localFile = File(modelDir, fileConfig.fileName)
-                if (localFile.exists() && localFile.length() > 0L) {
+                if (localFile.isUsableFor(fileConfig)) {
                     Log.d(TAG, "Skipping existing file ${fileConfig.fileName} size=${localFile.length()}")
                     continue
+                }
+                if (localFile.exists()) {
+                    Log.w(TAG, "Existing file ${fileConfig.fileName} is incomplete or invalid, re-downloading size=${localFile.length()}")
                 }
 
                 val url = fileConfig.url.trim()
@@ -129,6 +132,14 @@ class ModelDownloadRepository(
             if (!tempFile.exists() || tempFile.length() <= 0L) {
                 throw IllegalStateException("Downloaded file is empty: ${fileConfig.fileName}")
             }
+            fileConfig.minBytes?.let { minBytes ->
+                if (tempFile.length() < minBytes) {
+                    throw IllegalStateException(
+                        "Downloaded file is incomplete: ${fileConfig.fileName} " +
+                            "(${tempFile.length()} bytes, expected at least $minBytes bytes)"
+                    )
+                }
+            }
 
             if (targetFile.exists() && !targetFile.delete()) {
                 throw IllegalStateException("Unable to replace existing file: ${targetFile.name}")
@@ -186,6 +197,11 @@ class ModelDownloadRepository(
             normalized == "url" ||
             normalized == "tbd" ||
             normalized == "todo"
+    }
+
+    private fun File.isUsableFor(fileConfig: ModelFileConfig): Boolean {
+        if (!exists() || !isFile || length() <= 0L) return false
+        return fileConfig.minBytes?.let { length() >= it } != false
     }
 
     private companion object {

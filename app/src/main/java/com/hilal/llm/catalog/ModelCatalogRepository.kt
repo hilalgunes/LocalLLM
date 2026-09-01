@@ -358,11 +358,41 @@ object ModelCatalogRepository {
                     fileName = "Qwen3-Embedding-0.6B-Q8_0.gguf",
                     url = "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf",
                     required = true,
-                    description = "Primary Qwen3 embedding model file."
+                    description = "Primary Qwen3 embedding model file.",
+                    minBytes = 600_000_000L
                 )
             ),
             estimatedSize = "~639 MB",
             quantization = "Q8_0",
+            isEnabled = true,
+            disabledReason = null
+        ),
+        ModelConfig(
+            id = "gecko-110m-en-256-litert",
+            displayName = "Gecko 110M EN 256 LiteRT",
+            description = "LiteRT/TFLite local text embedding model for semantic retrieval.",
+            runtimeType = RuntimeType.LITERT,
+            engineType = EngineType.LITERT_LM,
+            promptTemplateType = PromptTemplateType.LLAMA,
+            files = listOf(
+                ModelFileConfig(
+                    type = ModelFileType.LITERT_TFLITE,
+                    fileName = "Gecko_256_quant.tflite",
+                    url = "https://huggingface.co/litert-community/Gecko-110m-en/resolve/main/Gecko_256_quant.tflite",
+                    required = true,
+                    description = "Primary Gecko LiteRT embedding model file.",
+                    minBytes = 100_000_000L
+                ),
+                ModelFileConfig(
+                    type = ModelFileType.OTHER,
+                    fileName = "sentencepiece.model",
+                    url = "https://huggingface.co/litert-community/Gecko-110m-en/resolve/main/sentencepiece.model",
+                    required = true,
+                    description = "SentencePiece tokenizer for Gecko embedding."
+                )
+            ),
+            estimatedSize = "~115 MB",
+            quantization = "dynamic INT8",
             isEnabled = true,
             disabledReason = null
         ),
@@ -379,7 +409,8 @@ object ModelCatalogRepository {
                     fileName = "multilingual-e5-small-q8_0.gguf",
                     url = "https://huggingface.co/cstr/multilingual-e5-small-GGUF/resolve/main/multilingual-e5-small-q8_0.gguf",
                     required = true,
-                    description = "Primary multilingual embedding model file."
+                    description = "Primary multilingual embedding model file.",
+                    minBytes = 120_000_000L
                 )
             ),
             estimatedSize = "~132 MB",
@@ -400,7 +431,8 @@ object ModelCatalogRepository {
                     fileName = "all-MiniLM-L6-v2-q8_0.gguf",
                     url = "https://huggingface.co/cstr/all-MiniLM-L6-v2-GGUF/resolve/main/all-MiniLM-L6-v2-q8_0.gguf",
                     required = true,
-                    description = "Primary MiniLM embedding model file."
+                    description = "Primary MiniLM embedding model file.",
+                    minBytes = 20_000_000L
                 )
             ),
             estimatedSize = "~24.7 MB",

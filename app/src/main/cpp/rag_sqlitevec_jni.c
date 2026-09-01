@@ -13,17 +13,14 @@ static const char *kDocumentsSql =
     "text TEXT NOT NULL,"
     "chunk_count INTEGER NOT NULL)";
 
-static const char *kChunksSql =
-    "CREATE VIRTUAL TABLE IF NOT EXISTS rag_chunks USING vec0("
-    "embedding float[384],"
-    "document_id TEXT,"
-    "document_name TEXT,"
-    "chunk_index INTEGER,"
-    "text TEXT"
-    ")";
+static const char *kMetaSql =
+    "CREATE TABLE IF NOT EXISTS rag_meta ("
+    "key TEXT PRIMARY KEY,"
+    "value TEXT NOT NULL)";
 
 typedef struct RagNativeStore {
     sqlite3 *db;
+    int vector_dimension;
 } RagNativeStore;
 
 extern int sqlite3_vec_init(sqlite3 *db, char **pzErrMsg,
@@ -83,18 +80,74 @@ static int exec_sql(sqlite3 *db, const char *sql) {
     return rc;
 }
 
+static int create_chunks_table(sqlite3 *db, int dimension) {
+    char sql[256];
+    snprintf(sql, sizeof(sql),
+             "CREATE VIRTUAL TABLE IF NOT EXISTS rag_chunks USING vec0("
+             "embedding float[%d],"
+             "document_id TEXT,"
+             "document_name TEXT,"
+             "chunk_index INTEGER,"
+             "text TEXT"
+             ")",
+             dimension);
+    return exec_sql(db, sql);
+}
+
+static int read_vector_dimension(sqlite3 *db) {
+    sqlite3_stmt *stmt = NULL;
+    int dimension = 0;
+    int rc = sqlite3_prepare_v2(db, "SELECT value FROM rag_meta WHERE key = 'vector_dimension';", -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        dimension = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    return dimension;
+}
+
+static int write_vector_dimension(sqlite3 *db, int dimension) {
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(
+        db,
+        "INSERT INTO rag_meta(key, value) VALUES('vector_dimension', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value;",
+        -1,
+        &stmt,
+        NULL
+    );
+    if (rc != SQLITE_OK) return rc;
+    sqlite3_bind_int(stmt, 1, dimension);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return rc == SQLITE_DONE ? SQLITE_OK : rc;
+}
+
+static int ensure_vector_schema(sqlite3 *db, int dimension) {
+    int stored_dimension = read_vector_dimension(db);
+    if (stored_dimension > 0 && stored_dimension != dimension) {
+        int rc = exec_sql(db, "DROP TABLE IF EXISTS rag_chunks;");
+        if (rc != SQLITE_OK) return rc;
+    }
+
+    int rc = create_chunks_table(db, dimension);
+    if (rc != SQLITE_OK) return rc;
+    rc = write_vector_dimension(db, dimension);
+    return rc;
+}
+
 static int ensure_schema(sqlite3 *db) {
     int rc = exec_sql(db, "PRAGMA journal_mode=WAL;");
     if (rc != SQLITE_OK) return rc;
     rc = exec_sql(db, "PRAGMA synchronous=NORMAL;");
     if (rc != SQLITE_OK) return rc;
-    rc = exec_sql(db, "DROP TABLE IF EXISTS rag_chunks;");
-    if (rc != SQLITE_OK) return rc;
-    rc = exec_sql(db, "DROP TABLE IF EXISTS rag_documents;");
-    if (rc != SQLITE_OK) return rc;
     rc = exec_sql(db, kDocumentsSql);
     if (rc != SQLITE_OK) return rc;
-    rc = exec_sql(db, kChunksSql);
+    rc = exec_sql(db, kMetaSql);
+    if (rc != SQLITE_OK) return rc;
+    int dimension = read_vector_dimension(db);
+    if (dimension <= 0) dimension = 384;
+    rc = ensure_vector_schema(db, dimension);
     return rc;
 }
 
@@ -121,6 +174,37 @@ static void throw_sqlite_stage_error(JNIEnv *env, sqlite3 *db, const char *stage
     char buffer[512];
     snprintf(buffer, sizeof(buffer), "%s (stage=%s, rc=%d)", message != NULL ? message : "sqlite error", stage, rc);
     throw_runtime(env, buffer);
+}
+
+static int clear_vec0_rows(sqlite3 *db) {
+    sqlite3_stmt *selectStmt = NULL;
+    sqlite3_stmt *deleteStmt = NULL;
+    int rc = sqlite3_prepare_v2(db, "SELECT rowid FROM rag_chunks;", -1, &selectStmt, NULL);
+    if (rc != SQLITE_OK) {
+        return rc;
+    }
+
+    rc = sqlite3_prepare_v2(db, "DELETE FROM rag_chunks WHERE rowid = ?;", -1, &deleteStmt, NULL);
+    if (rc != SQLITE_OK) {
+        sqlite3_finalize(selectStmt);
+        return rc;
+    }
+
+    while ((rc = sqlite3_step(selectStmt)) == SQLITE_ROW) {
+        sqlite3_int64 rowid = sqlite3_column_int64(selectStmt, 0);
+        sqlite3_reset(deleteStmt);
+        sqlite3_clear_bindings(deleteStmt);
+        sqlite3_bind_int64(deleteStmt, 1, rowid);
+        rc = sqlite3_step(deleteStmt);
+        if (rc != SQLITE_DONE) {
+            break;
+        }
+        rc = SQLITE_OK;
+    }
+
+    sqlite3_finalize(selectStmt);
+    sqlite3_finalize(deleteStmt);
+    return rc == SQLITE_DONE ? SQLITE_OK : rc;
 }
 
 JNIEXPORT jlong JNICALL
@@ -156,6 +240,10 @@ Java_com_hilal_llm_rag_RagVectorStoreNative_open(JNIEnv *env, jobject thiz, jstr
         sqlite3_close(store->db);
         free(store);
         return 0;
+    }
+    store->vector_dimension = read_vector_dimension(store->db);
+    if (store->vector_dimension <= 0) {
+        store->vector_dimension = 384;
     }
 
     return (jlong)(intptr_t)store;
@@ -201,6 +289,25 @@ Java_com_hilal_llm_rag_RagVectorStoreNative_replaceAll(
 
     jsize docCount = docIds != NULL ? (*env)->GetArrayLength(env, docIds) : 0;
     jsize chunkCount = chunkDocIds != NULL ? (*env)->GetArrayLength(env, chunkDocIds) : 0;
+    int vectorDimension = store->vector_dimension > 0 ? store->vector_dimension : 384;
+    if (chunkCount > 0 && chunkEmbeddings != NULL) {
+        jbyteArray firstEmbedding = (jbyteArray)(*env)->GetObjectArrayElement(env, chunkEmbeddings, 0);
+        jsize firstEmbeddingLen = firstEmbedding != NULL ? (*env)->GetArrayLength(env, firstEmbedding) : 0;
+        if (firstEmbedding != NULL) {
+            (*env)->DeleteLocalRef(env, firstEmbedding);
+        }
+        if (firstEmbeddingLen <= 0 || firstEmbeddingLen % 4 != 0) {
+            throw_runtime(env, "Invalid embedding byte length for sqlite-vec.");
+            return SQLITE_ERROR;
+        }
+        vectorDimension = firstEmbeddingLen / 4;
+        int schemaRc = ensure_vector_schema(store->db, vectorDimension);
+        if (schemaRc != SQLITE_OK) {
+            throw_sqlite_stage_error(env, store->db, "ensure vector schema", schemaRc);
+            return SQLITE_ERROR;
+        }
+        store->vector_dimension = vectorDimension;
+    }
     jint *docCounts = docChunkCounts != NULL ? (*env)->GetIntArrayElements(env, docChunkCounts, NULL) : NULL;
     jint *indices = chunkIndices != NULL ? (*env)->GetIntArrayElements(env, chunkIndices, NULL) : NULL;
 
@@ -213,7 +320,7 @@ Java_com_hilal_llm_rag_RagVectorStoreNative_replaceAll(
     }
 
     const char *errorStage = "delete rag_chunks";
-    rc = exec_sql(store->db, "DELETE FROM rag_chunks;");
+    rc = clear_vec0_rows(store->db);
     if (rc == SQLITE_OK) {
         errorStage = "delete rag_documents";
         rc = exec_sql(store->db, "DELETE FROM rag_documents;");
@@ -275,19 +382,25 @@ Java_com_hilal_llm_rag_RagVectorStoreNative_replaceAll(
             const char *chunkTextUtf = chunkText != NULL ? (*env)->GetStringUTFChars(env, chunkText, NULL) : "";
             jbyte *embeddingBytes = chunkEmbedding != NULL ? (*env)->GetByteArrayElements(env, chunkEmbedding, NULL) : NULL;
             jsize embeddingLen = chunkEmbedding != NULL ? (*env)->GetArrayLength(env, chunkEmbedding) : 0;
-
-            sqlite3_reset(chunkStmt);
-            sqlite3_clear_bindings(chunkStmt);
-            if (embeddingBytes != NULL) {
-                sqlite3_bind_blob(chunkStmt, 1, embeddingBytes, embeddingLen, SQLITE_TRANSIENT);
-            } else {
-                sqlite3_bind_null(chunkStmt, 1);
+            if (embeddingLen != vectorDimension * 4) {
+                rc = SQLITE_MISMATCH;
+                errorStage = "embedding dimension mismatch";
             }
-            bind_text(chunkStmt, 2, docIdUtf);
-            bind_text(chunkStmt, 3, docNameUtf);
-            sqlite3_bind_int(chunkStmt, 4, indices != NULL ? indices[i] : 0);
-            bind_text(chunkStmt, 5, chunkTextUtf);
-            rc = sqlite3_step(chunkStmt);
+
+            if (rc == SQLITE_OK) {
+                sqlite3_reset(chunkStmt);
+                sqlite3_clear_bindings(chunkStmt);
+                if (embeddingBytes != NULL) {
+                    sqlite3_bind_blob(chunkStmt, 1, embeddingBytes, embeddingLen, SQLITE_TRANSIENT);
+                } else {
+                    sqlite3_bind_null(chunkStmt, 1);
+                }
+                bind_text(chunkStmt, 2, docIdUtf);
+                bind_text(chunkStmt, 3, docNameUtf);
+                sqlite3_bind_int(chunkStmt, 4, indices != NULL ? indices[i] : 0);
+                bind_text(chunkStmt, 5, chunkTextUtf);
+                rc = sqlite3_step(chunkStmt);
+            }
 
             if (chunkEmbedding != NULL) {
                 (*env)->ReleaseByteArrayElements(env, chunkEmbedding, embeddingBytes, JNI_ABORT);
@@ -415,6 +528,11 @@ Java_com_hilal_llm_rag_RagVectorStoreNative_rank(
     jsize embeddingLen = (*env)->GetArrayLength(env, questionEmbedding);
     if (embeddingBytes == NULL) {
         throw_runtime(env, "question embedding is empty");
+        return NULL;
+    }
+    if (store->vector_dimension > 0 && embeddingLen != store->vector_dimension * 4) {
+        (*env)->ReleaseByteArrayElements(env, questionEmbedding, embeddingBytes, JNI_ABORT);
+        throw_runtime(env, "question embedding dimension does not match sqlite-vec index dimension");
         return NULL;
     }
 

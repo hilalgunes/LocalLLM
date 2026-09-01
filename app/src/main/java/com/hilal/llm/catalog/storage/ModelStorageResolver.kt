@@ -28,9 +28,16 @@ class ModelStorageResolver(
     }
 
     fun isModelDownloaded(config: ModelConfig): Boolean {
-        return resolveFiles(config)
+        val modelDir = getModelDir(config)
+        return config.files
             .filter { it.required }
-            .all { it.exists }
+            .all { fileConfig ->
+                val localFile = File(modelDir, fileConfig.fileName)
+                localFile.exists() &&
+                    localFile.isFile &&
+                    localFile.length() > 0L &&
+                    fileConfig.minBytes?.let { localFile.length() >= it } != false
+            }
     }
 
     fun deleteModel(config: ModelConfig): Boolean {

@@ -17,6 +17,67 @@ private val stopWords = setOf(
     "the", "and", "or", "to", "of", "in", "is", "are", "on", "for"
 )
 
+private const val VECTOR_DIMENSION = 384
+
+internal object RagVectorEncoder {
+    fun encode(text: String): FloatArray {
+        val vector = FloatArray(VECTOR_DIMENSION)
+        val normalized = normalizeText(text)
+        if (normalized.isBlank()) return vector
+
+        val tokens = tokenizerRegex
+            .split(normalized)
+            .asSequence()
+            .map { it.trim() }
+            .filter { it.isNotBlank() && it !in stopWords }
+            .toList()
+
+        tokens.forEachIndexed { index, token ->
+            val hash = token.hashCode()
+            val primaryBucket = Math.floorMod(hash, VECTOR_DIMENSION)
+            val secondaryBucket = Math.floorMod(hash * 31 + token.length, VECTOR_DIMENSION)
+            val weight = 1f + minOf(token.length, 12) / 12f
+            vector[primaryBucket] += weight
+            vector[secondaryBucket] += weight * 0.5f
+
+            if (index > 0) {
+                val bigram = tokens[index - 1] + "_" + token
+                val bigramBucket = Math.floorMod(bigram.hashCode(), VECTOR_DIMENSION)
+                vector[bigramBucket] += 0.35f
+            }
+        }
+
+        normalizeVector(vector)
+        return vector
+    }
+
+    private fun normalizeText(text: String): String {
+        return text.lowercase()
+            .replace("ı", "i")
+            .replace("İ", "i")
+            .replace("ş", "s")
+            .replace("ğ", "g")
+            .replace("ü", "u")
+            .replace("ö", "o")
+            .replace("ç", "c")
+    }
+
+    private fun normalizeVector(vector: FloatArray) {
+        var sumSquares = 0.0
+        for (value in vector) {
+            sumSquares += value.toDouble() * value.toDouble()
+        }
+        if (sumSquares <= 0.0) return
+
+        val magnitude = kotlin.math.sqrt(sumSquares).toFloat()
+        if (magnitude == 0f) return
+
+        for (i in vector.indices) {
+            vector[i] /= magnitude
+        }
+    }
+}
+
 suspend fun readDocumentText(
     contentResolver: ContentResolver,
     uri: Uri,
@@ -39,8 +100,14 @@ suspend fun readDocumentText(
     }
 }
 
-fun buildChunksFromDocument(documentId: String, displayName: String, text: String): List<RagChunk> {
-    val chunks = chunkText(text)
+fun buildChunksFromDocument(
+    documentId: String,
+    displayName: String,
+    text: String,
+    chunkSize: Int = 900,
+    overlap: Int = 150
+): List<RagChunk> {
+    val chunks = chunkText(text, chunkSize = chunkSize, overlap = overlap)
     return chunks.mapIndexed { index, chunk ->
         RagChunk(
             documentId = documentId,
@@ -77,16 +144,14 @@ fun chunkText(
 suspend fun rankChunks(
     question: String,
     chunks: List<RagChunk>,
-    embeddingModelPath: String,
-    embeddingProvider: RagEmbeddingProvider,
     limit: Int = 4
 ): List<RagChunk> {
     if (chunks.isEmpty()) return emptyList()
 
-    val questionVector = embeddingProvider.embed(question, embeddingModelPath)
+    val questionVector = RagVectorEncoder.encode(question)
     return chunks
         .map { chunk ->
-            val chunkVector = embeddingProvider.embed(chunk.text, embeddingModelPath)
+            val chunkVector = RagVectorEncoder.encode(chunk.text)
             val score = cosineSimilarity(questionVector, chunkVector)
             chunk to score
         }
@@ -97,11 +162,74 @@ suspend fun rankChunks(
         .take(limit)
 }
 
+fun rankChunksWithEmbeddings(
+    questionEmbedding: FloatArray,
+    chunks: List<RagChunk>,
+    chunkEmbeddings: Map<String, FloatArray>,
+    limit: Int = 4
+): List<RagChunk> {
+    if (chunks.isEmpty()) return emptyList()
+
+    return chunks
+        .map { chunk ->
+            val chunkVector = chunkEmbeddings[chunkEmbeddingKey(chunk)]
+                ?: throw IllegalStateException("Missing embedding for ${chunk.documentName} / parça ${chunk.chunkIndex + 1}")
+            val score = cosineSimilarity(questionEmbedding, chunkVector)
+            chunk to score
+        }
+        .sortedWith(compareByDescending<Pair<RagChunk, Double>> { it.second }
+            .thenBy { it.first.documentName }
+            .thenBy { it.first.chunkIndex })
+        .map { it.first }
+        .take(limit)
+}
+
+fun rankChunksByKeywordOverlap(
+    question: String,
+    chunks: List<RagChunk>,
+    limit: Int = 4
+): List<RagChunk> {
+    if (chunks.isEmpty()) return emptyList()
+
+    val questionTokens = tokenizeForRanking(question)
+    if (questionTokens.isEmpty()) {
+        return chunks
+            .sortedWith(compareBy<RagChunk> { it.documentName }.thenBy { it.chunkIndex })
+            .take(limit)
+    }
+
+    return chunks
+        .map { chunk ->
+            val chunkTokens = tokenizeForRanking(chunk.text)
+            val questionEntities = RagGraphRetriever.extractEntities(question)
+            val chunkEntities = RagGraphRetriever.extractEntities(chunk.text)
+            val overlapScore = chunkTokens.count { it in questionTokens }
+            val exactPhraseBonus = if (chunk.text.contains(question.trim(), ignoreCase = true)) 3 else 0
+            val entityScore = chunkEntities.count { it in questionEntities } * 4
+            val phraseScore = chunkEntities.count { it.contains('_') && it in questionEntities } * 8
+            chunk to (overlapScore + exactPhraseBonus + entityScore + phraseScore)
+        }
+        .sortedWith(
+            compareByDescending<Pair<RagChunk, Int>> { it.second }
+                .thenBy { it.first.documentName }
+                .thenBy { it.first.chunkIndex }
+        )
+        .map { it.first }
+        .take(limit)
+}
+
 fun buildRagPrompt(question: String, chunks: List<RagChunk>): String {
+    val criticalNumbers = Regex("""\d+""")
+        .findAll(question)
+        .map { it.value }
+        .toList()
+    val criticalTerms = listOf("yıl", "izin", "gün")
+        .filter { question.contains(it, ignoreCase = true) }
+
     val context = if (chunks.isEmpty()) {
         "Belge bağlamı bulunamadı."
     } else {
-        chunks.joinToString(separator = "\n\n") { chunk ->
+        val selectedChunkContext = chunks.joinToString(separator = "\n\n") { chunk ->
             buildString {
                 append('[')
                 append(chunk.documentName)
@@ -110,6 +238,12 @@ fun buildRagPrompt(question: String, chunks: List<RagChunk>): String {
                 append("]\n")
                 append(chunk.text.trim())
             }
+        }
+        val relevantEvidence = buildRelevantEvidence(question, chunks)
+        if (relevantEvidence.isBlank()) {
+            selectedChunkContext
+        } else {
+            "$relevantEvidence\n\nSeçilen kaynak parçalar:\n$selectedChunkContext"
         }
     }
 
@@ -120,8 +254,14 @@ fun buildRagPrompt(question: String, chunks: List<RagChunk>): String {
         İngilizce kelimeler, cümleler, başlıklar veya etiketler kullanma.
         Bilgi belgelerde yoksa bunu açıkça söyle.
         Belgedeki ifadeyi uydurma, tahmin etme veya genelleme yapma.
+        Eğer soruda bir sayı varsa, belgedeki sayı aralıklarını bu sayıya göre eşleştir.
+        Aynı bağlamda birden fazla kural varsa, yalnızca sorudaki sayıyı kapsayan kuralı kullan.
+        Cevap verirken belgedeki ilgili satırı esas al ve komşu satırlardaki farklı aralıkları karıştırma.
         Cevap kısa ve doğrudan olsun.
         Başlık, madde işareti, numaralandırma, "Cevap:" etiketi, düşünme metni ve kaynak notu yazma.
+
+        Soru içindeki kritik sayı(lar): ${criticalNumbers.joinToString(", ").ifBlank { "yok" }}
+        Soru içindeki kritik terimler: ${criticalTerms.joinToString(", ").ifBlank { "yok" }}
 
         Belge bağlamı:
         $context
@@ -129,6 +269,105 @@ fun buildRagPrompt(question: String, chunks: List<RagChunk>): String {
         Soru:
         ${question.trim()}
     """.trimIndent()
+}
+
+private fun buildRelevantEvidence(question: String, chunks: List<RagChunk>): String {
+    val questionTokens = tokenizeForRanking(question)
+    val questionNumbers = Regex("""\d+""")
+        .findAll(question)
+        .map { it.value }
+        .toSet()
+    val questionYear = extractFirstQuestionYear(question)
+
+    return chunks.flatMap { chunk ->
+        val sentences = splitIntoEvidenceSentences(chunk.text)
+        sentences.map { sentence ->
+            val score = scoreEvidenceSentence(
+                question = question,
+                sentence = sentence,
+                questionTokens = questionTokens,
+                questionNumbers = questionNumbers,
+                questionYear = questionYear
+            )
+            chunk to (sentence.trim() to score)
+        }
+    }
+        .sortedWith(
+            compareByDescending<Pair<RagChunk, Pair<String, Int>>> { it.second.second }
+                .thenBy { it.first.documentName }
+                .thenBy { it.first.chunkIndex }
+        )
+        .take(6)
+        .joinToString(separator = "\n\n") { (chunk, sentenceScore) ->
+            val (sentence, score) = sentenceScore
+            buildString {
+                append('[')
+                append(chunk.documentName)
+                append(" / Parça ")
+                append(chunk.chunkIndex + 1)
+                append(" | Skor ")
+                append(score)
+                append("]\n")
+                append(sentence)
+            }
+        }
+}
+
+private fun scoreEvidenceSentence(
+    question: String,
+    sentence: String,
+    questionTokens: Set<String>,
+    questionNumbers: Set<String>,
+    questionYear: Int?
+): Int {
+    val sentenceTokens = tokenizeForRanking(sentence)
+    val overlap = sentenceTokens.count { it in questionTokens }
+    val exactQuestionPhraseBonus = if (sentence.contains(question.trim(), ignoreCase = true)) 8 else 0
+    val numberBonus = if (questionNumbers.any { it in sentence }) 4 else 0
+    val yearBonus = if (question.contains("yıl", ignoreCase = true) && sentence.contains("yıl", ignoreCase = true)) 3 else 0
+    val leaveBonus = if (question.contains("izin", ignoreCase = true) && sentence.contains("izin", ignoreCase = true)) 3 else 0
+    val yearRangeBonus = questionYear?.let { scoreSentenceYearRange(it, sentence) } ?: 0
+    return overlap + exactQuestionPhraseBonus + numberBonus + yearBonus + leaveBonus + yearRangeBonus
+}
+
+private fun extractFirstQuestionYear(question: String): Int? {
+    return Regex("""\d+""")
+        .findAll(question)
+        .firstOrNull()
+        ?.value
+        ?.toIntOrNull()
+}
+
+private fun scoreSentenceYearRange(questionYear: Int, sentence: String): Int {
+    val yearNumbers = Regex("""(\d+)\s*yıl""", RegexOption.IGNORE_CASE)
+        .findAll(sentence)
+        .mapNotNull { matchResult -> matchResult.groupValues.getOrNull(1)?.toIntOrNull() }
+        .toList()
+
+    if (yearNumbers.size < 2) return 0
+
+    var bestScore = 0
+    for (index in 0 until yearNumbers.lastIndex) {
+        val lower = minOf(yearNumbers[index], yearNumbers[index + 1])
+        val upper = maxOf(yearNumbers[index], yearNumbers[index + 1])
+        if (questionYear in lower..upper) {
+            bestScore = maxOf(bestScore, 12)
+        } else {
+            val distance = minOf(
+                kotlin.math.abs(questionYear - lower),
+                kotlin.math.abs(questionYear - upper)
+            )
+            bestScore = maxOf(bestScore, (6 - distance).coerceAtLeast(0))
+        }
+    }
+    return bestScore
+}
+
+private fun splitIntoEvidenceSentences(text: String): List<String> {
+    return text
+        .split(Regex("""(?<=[.!?\n])\s+"""))
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
 }
 
 data class StrictRagAnswer(
@@ -139,7 +378,7 @@ data class StrictRagAnswer(
 
 fun buildStrictRagAnswer(question: String, chunks: List<RagChunk>): StrictRagAnswer? {
     val normalizedQuestion = normalizeForRuleMatching(question)
-    val questionYear = extractFirstNumberBeforeWord(normalizedQuestion, "yil")
+    val questionYear = extractServiceYears(normalizedQuestion)
     val questionAge = extractFirstNumberBeforeWord(normalizedQuestion, "yas")
 
     val leaveAnswer = questionYear?.let { year ->
@@ -172,12 +411,18 @@ fun sanitizeRagOutput(rawText: String): String {
         .replace(Regex("""(?im)^\s*(Cevap|Yanıt|Answer)\s*:\s*"""), "")
         .replace(Regex("""(?im)^\s*[?]+\s*$"""), "")
         .replace(Regex("""(?im)^\s*(Bu bilgi|Belge bağlamından|Kaynaklar?)\b.*$"""), "")
+        .replace(Regex("""(?is)\s*Kaynak\s*(notu)?\s*:.*$"""), "")
     return withoutLabels
+        .replace(Regex("""(?<=[\p{L}])(?=\d)"""), " ")
         .replace(Regex("""\s+"""), " ")
         .trim()
 }
 
 fun createDocumentId(): String = UUID.randomUUID().toString()
+
+fun chunkEmbeddingKey(chunk: RagChunk): String {
+    return "${chunk.documentId}:${chunk.chunkIndex}"
+}
 
 fun truncateForPreview(text: String, maxLength: Int = 280): String {
     val trimmed = text.trim()
@@ -342,6 +587,31 @@ private fun parseAnnualLeaveRule(year: Int, line: String, chunk: RagChunk): Rule
         }
         if (matches) {
             return RuleMatch(days, chunk, line)
+        }
+    }
+    return null
+}
+
+private fun tokenizeForRanking(text: String): Set<String> {
+    return tokenizerRegex
+        .split(text.lowercase())
+        .asSequence()
+        .map { it.trim() }
+        .filter { it.isNotBlank() && it !in stopWords }
+        .toSet()
+}
+
+private fun extractServiceYears(text: String): Int? {
+    val patterns = listOf(
+        Regex("""(\d+)\s*yil\b"""),
+        Regex("""(\d+)\s*yillik\b"""),
+        Regex("""(\d+)\s*senelik\b""")
+    )
+
+    for (pattern in patterns) {
+        val match = pattern.find(text)
+        if (match != null) {
+            return match.groupValues[1].toIntOrNull()
         }
     }
     return null

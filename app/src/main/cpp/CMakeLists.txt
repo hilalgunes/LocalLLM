@@ -4,6 +4,7 @@ project(rag_sqlitevec C)
 
 add_library(rag_sqlitevec SHARED
     rag_sqlitevec_jni.c
+    llamacpp_embedding_compat_jni.c
     sqlite-vec.c
     sqlite3.c
 )
@@ -18,6 +19,8 @@ target_compile_definitions(rag_sqlitevec PRIVATE
 )
 
 find_library(log-lib log)
+find_library(dl-lib dl)
 target_link_libraries(rag_sqlitevec
     ${log-lib}
+    ${dl-lib}
 )

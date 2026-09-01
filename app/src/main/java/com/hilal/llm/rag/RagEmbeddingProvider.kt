@@ -4,16 +4,31 @@ import android.content.ContentResolver
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import com.google.ai.edge.localagents.rag.models.EmbedData
+import com.google.ai.edge.localagents.rag.models.EmbeddingRequest
+import com.google.ai.edge.localagents.rag.models.GeckoEmbeddingModel
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import org.nehuatl.llamacpp.LlamaAndroid
+import org.nehuatl.llamacpp.LlamaContext
 import java.io.File
+import java.util.Optional
 import java.util.concurrent.ConcurrentHashMap
 
+enum class RagEmbeddingPurpose {
+    QUERY,
+    DOCUMENT
+}
+
 interface RagEmbeddingProvider {
-    suspend fun embed(text: String, embeddingModelPath: String): FloatArray
-    suspend fun canInitialize(embeddingModelPath: String): Boolean
+    suspend fun embed(
+        text: String,
+        embeddingModelPath: String,
+        tokenizerPath: String?,
+        purpose: RagEmbeddingPurpose
+    ): FloatArray
+
+    suspend fun canInitialize(embeddingModelPath: String, tokenizerPath: String?): Boolean
     fun close()
 }
 
@@ -28,25 +43,46 @@ class LlamaCppRagEmbeddingProvider(
 
     private data class LoadedEmbeddingModel(
         val contextId: Int,
-        val modelUri: String
+        val modelUri: String,
+        val llamaContext: LlamaContext
     )
 
     private val llamaAndroid = LlamaAndroid(contentResolver)
     private val loadedModels = ConcurrentHashMap<String, LoadedEmbeddingModel>()
+    private val failedModelMessages = ConcurrentHashMap<String, String>()
 
-    override suspend fun embed(text: String, embeddingModelPath: String): FloatArray = withContext(Dispatchers.IO) {
+    override suspend fun embed(
+        text: String,
+        embeddingModelPath: String,
+        tokenizerPath: String?,
+        purpose: RagEmbeddingPurpose
+    ): FloatArray = withContext(Dispatchers.IO) {
+        @Suppress("UNUSED_VARIABLE")
+        val ignoredTokenizerPath = tokenizerPath
+        @Suppress("UNUSED_VARIABLE")
+        val ignoredPurpose = purpose
         val modelUri = embeddingModelPath.toFileUriString()
+        failedModelMessages[modelUri]?.let { message ->
+            throw IllegalStateException(message)
+        }
         val loadedModel = loadedModels[modelUri] ?: loadModel(modelUri)
-        val contextId = loadedModel.contextId
-        val result = llamaAndroid.embedding(contextId, text).first()
+        val result = LlamaCppEmbeddingCompat.embedding(
+            llamaContext = loadedModel.llamaContext,
+            contextPtr = loadedModel.llamaContext.context,
+            text = text
+        )
         extractEmbeddingVector(result)
     }
 
-    override suspend fun canInitialize(embeddingModelPath: String): Boolean = withContext(Dispatchers.IO) {
+    override suspend fun canInitialize(embeddingModelPath: String, tokenizerPath: String?): Boolean = withContext(Dispatchers.IO) {
+        @Suppress("UNUSED_VARIABLE")
+        val ignoredTokenizerPath = tokenizerPath
         runCatching {
             val modelUri = embeddingModelPath.toFileUriString()
             if (loadedModels.containsKey(modelUri)) {
                 true
+            } else if (failedModelMessages.containsKey(modelUri)) {
+                false
             } else {
                 val loadedModel = loadModel(modelUri)
                 loadedModels[modelUri] = loadedModel
@@ -62,12 +98,15 @@ class LlamaCppRagEmbeddingProvider(
             }
         }
         loadedModels.clear()
+        failedModelMessages.clear()
     }
 
     private fun loadModel(modelUri: String): LoadedEmbeddingModel {
         if (!isLikelyGguf(modelUri)) {
             throw IllegalArgumentException("Embedding model must be a GGUF file: $modelUri")
         }
+
+        releaseOtherModels(modelUri)
 
         val modelFileUri = Uri.parse(modelUri)
         val pfd = openReadOnlyDescriptor(modelFileUri)
@@ -89,7 +128,7 @@ class LlamaCppRagEmbeddingProvider(
                     "n_threads" to 0,
                     "n_gpu_layers" to 0,
                     "use_mlock" to false,
-                    "use_mmap" to false,
+                    "use_mmap" to true,
                     "vocab_only" to false
                 )
             ) { _ -> }
@@ -100,15 +139,40 @@ class LlamaCppRagEmbeddingProvider(
 
             Log.d(TAG, "Embedding model initialized modelUri=$modelUri contextId=$contextId resultKeys=${result.keys}")
 
-            val loadedModel = LoadedEmbeddingModel(contextId = contextId, modelUri = modelUri)
+            val loadedModel = LoadedEmbeddingModel(
+                contextId = contextId,
+                modelUri = modelUri,
+                llamaContext = getLoadedContext(contextId)
+            )
             loadedModels[modelUri] = loadedModel
             loadedModel
         } catch (throwable: Throwable) {
+            failedModelMessages[modelUri] = throwable.message ?: "Embedding model initialization failed."
             Log.e(TAG, "Failed to load embedding model: $modelUri fd=$modelFd", throwable)
-            runCatching {
-                pfd.close()
-            }
             throw throwable
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun getLoadedContext(contextId: Int): LlamaContext {
+        val field = LlamaAndroid::class.java.getDeclaredField("contexts")
+        field.isAccessible = true
+        val contexts = field.get(llamaAndroid) as? ConcurrentHashMap<Int, LlamaContext>
+            ?: throw IllegalStateException("Embedding context registry is unavailable.")
+        return contexts[contextId]
+            ?: throw IllegalStateException("Embedding context was not found for id=$contextId.")
+    }
+
+    private fun releaseOtherModels(keepModelUri: String) {
+        loadedModels.entries.removeIf { entry ->
+            if (entry.key == keepModelUri) {
+                return@removeIf false
+            }
+
+            runCatching {
+                llamaAndroid.releaseContext(entry.value.contextId)
+            }
+            true
         }
     }
 
@@ -131,7 +195,14 @@ class LlamaCppRagEmbeddingProvider(
         }
     }
 
-    private fun extractEmbeddingVector(result: Map<String, Any>): FloatArray {
+    private fun extractEmbeddingVector(result: Any?): FloatArray {
+        val directVector = result?.let { coerceFloatArray(it) }
+        if (directVector != null && directVector.isNotEmpty()) {
+            return directVector
+        }
+
+        val resultMap = result as? Map<*, *>
+            ?: throw IllegalStateException("Embedding vector was not returned by the selected model.")
         val candidateKeys = listOf(
             "embedding",
             "embeddings",
@@ -143,22 +214,22 @@ class LlamaCppRagEmbeddingProvider(
         )
 
         for (key in candidateKeys) {
-            val value = result[key] ?: continue
+            val value = resultMap[key] ?: continue
             val vector = coerceFloatArray(value)
             if (vector != null && vector.isNotEmpty()) {
                 return vector
             }
         }
 
-        if (result.size == 1) {
-            val onlyValue = result.values.firstOrNull()
+        if (resultMap.size == 1) {
+            val onlyValue = resultMap.values.firstOrNull()
             val vector = onlyValue?.let { coerceFloatArray(it) }
             if (vector != null && vector.isNotEmpty()) {
                 return vector
             }
         }
 
-        throw IllegalStateException("Embedding vector was not found in result keys=${result.keys}")
+        throw IllegalStateException("Embedding vector was not found in result keys=${resultMap.keys}")
     }
 
     private fun coerceFloatArray(value: Any): FloatArray? {
@@ -193,5 +264,89 @@ class LlamaCppRagEmbeddingProvider(
     private fun isLikelyGguf(modelUri: String): Boolean {
         return modelUri.endsWith(".gguf", ignoreCase = true) ||
             modelUri.endsWith(".gguf/", ignoreCase = true)
+    }
+}
+
+class LiteRtGeckoRagEmbeddingProvider : RagEmbeddingProvider {
+    companion object {
+        private const val MAX_GECKO_256_INPUT_CHARS = 320
+    }
+
+    private data class LoadedGeckoModel(
+        val modelPath: String,
+        val tokenizerPath: String?,
+        val model: GeckoEmbeddingModel
+    )
+
+    private var loadedModel: LoadedGeckoModel? = null
+
+    override suspend fun embed(
+        text: String,
+        embeddingModelPath: String,
+        tokenizerPath: String?,
+        purpose: RagEmbeddingPurpose
+    ): FloatArray = withContext(Dispatchers.IO) {
+        val model = getOrLoadModel(embeddingModelPath, tokenizerPath).model
+        val taskType = when (purpose) {
+            RagEmbeddingPurpose.QUERY -> EmbedData.TaskType.RETRIEVAL_QUERY
+            RagEmbeddingPurpose.DOCUMENT -> EmbedData.TaskType.RETRIEVAL_DOCUMENT
+        }
+        val request = EmbeddingRequest.create(
+            listOf(EmbedData.create(text.prepareGecko256Input(), taskType))
+        )
+        model.getEmbeddings(request)
+            .get()
+            .map { it.toFloat() }
+            .toFloatArray()
+    }
+
+    override suspend fun canInitialize(embeddingModelPath: String, tokenizerPath: String?): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            getOrLoadModel(embeddingModelPath, tokenizerPath)
+            true
+        }.getOrDefault(false)
+    }
+
+    override fun close() {
+        loadedModel = null
+    }
+
+    private fun getOrLoadModel(
+        embeddingModelPath: String,
+        tokenizerPath: String?
+    ): LoadedGeckoModel {
+        val current = loadedModel
+        if (current != null &&
+            current.modelPath == embeddingModelPath &&
+            current.tokenizerPath == tokenizerPath
+        ) {
+            return current
+        }
+
+        val modelFile = File(embeddingModelPath)
+        if (!modelFile.exists() || modelFile.length() <= 0L) {
+            throw IllegalArgumentException("LiteRT embedding model file is missing: $embeddingModelPath")
+        }
+        val tokenizerFile = tokenizerPath?.let(::File)
+        if (tokenizerFile == null || !tokenizerFile.exists() || tokenizerFile.length() <= 0L) {
+            throw IllegalArgumentException("LiteRT Gecko embedding requires sentencepiece.model tokenizer.")
+        }
+
+        val model = GeckoEmbeddingModel(
+            modelFile.absolutePath,
+            Optional.of(tokenizerFile.absolutePath),
+            false
+        )
+        return LoadedGeckoModel(
+            modelPath = modelFile.absolutePath,
+            tokenizerPath = tokenizerFile.absolutePath,
+            model = model
+        ).also { loadedModel = it }
+    }
+
+    private fun String.prepareGecko256Input(): String {
+        return trim()
+            .take(MAX_GECKO_256_INPUT_CHARS)
+            .trim()
     }
 }

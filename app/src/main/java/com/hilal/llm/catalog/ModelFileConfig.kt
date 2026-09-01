@@ -5,5 +5,6 @@ data class ModelFileConfig(
     val fileName: String,
     val url: String,
     val required: Boolean,
-    val description: String? = null
+    val description: String? = null,
+    val minBytes: Long? = null
 )

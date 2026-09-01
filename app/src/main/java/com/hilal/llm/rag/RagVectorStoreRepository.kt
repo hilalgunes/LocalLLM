@@ -39,9 +39,10 @@ internal object RagVectorStoreNative {
 class RagVectorStoreRepository(context: Context) {
     private val mutex = Mutex()
     private val handle: Long
-    private val embeddingProvider: RagEmbeddingProvider = LlamaCppRagEmbeddingProvider(context.contentResolver)
+    private val graphStore = RagGraphStoreRepository(context.applicationContext)
     private var documents: List<RagDocument> = emptyList()
     private var chunks: List<RagChunk> = emptyList()
+    private var chunkEmbeddingsByKey: Map<String, FloatArray> = emptyMap()
 
     init {
         val dbPath = context.applicationContext.getDatabasePath("rag_vector_store.db").absolutePath
@@ -53,7 +54,6 @@ class RagVectorStoreRepository(context: Context) {
         if (handle != 0L) {
             RagVectorStoreNative.close(handle)
         }
-        embeddingProvider.close()
     }
 
     suspend fun initializeFromPersistentStore() = withContext(Dispatchers.IO) {
@@ -66,59 +66,133 @@ class RagVectorStoreRepository(context: Context) {
         RagVectorStoreSnapshot(documents = documents, chunks = chunks)
     }
 
-    suspend fun replaceAll(snapshot: RagVectorStoreSnapshot, embeddingModelPath: String) = mutex.withLock {
+    suspend fun replaceAll(
+        snapshot: RagVectorStoreSnapshot,
+        chunkEmbeddings: Map<String, FloatArray>
+    ) = mutex.withLock {
         documents = snapshot.documents
         chunks = snapshot.chunks
-        persistCurrentState(embeddingModelPath)
+        chunkEmbeddingsByKey = chunkEmbeddings
+        persistCurrentState()
+        snapshot.documents.forEach { document ->
+            graphStore.upsertDocumentGraph(
+                document = document,
+                chunks = chunks.filter { it.documentId == document.id }
+            )
+        }
     }
 
-    suspend fun upsertDocument(document: RagDocument, chunks: List<RagChunk>, embeddingModelPath: String) = mutex.withLock {
+    suspend fun upsertDocument(
+        document: RagDocument,
+        chunks: List<RagChunk>,
+        chunkEmbeddings: List<FloatArray>
+    ) = mutex.withLock {
         documents = documents.filterNot { it.id == document.id } + document
         this.chunks = this.chunks.filterNot { it.documentId == document.id } + chunks
-        persistCurrentState(embeddingModelPath)
+        chunkEmbeddingsByKey = chunkEmbeddingsByKey.toMutableMap().apply {
+            chunks.zip(chunkEmbeddings).forEach { (chunk, embedding) ->
+                put(chunkEmbeddingKey(chunk), embedding)
+            }
+        }
+        persistCurrentState()
+        graphStore.upsertDocumentGraph(document, chunks)
     }
 
-    suspend fun removeDocument(documentId: String, embeddingModelPath: String) = mutex.withLock {
+    suspend fun upsertGraphDocument(
+        document: RagDocument,
+        chunks: List<RagChunk>
+    ) = mutex.withLock {
+        documents = documents.filterNot { it.id == document.id } + document
+        this.chunks = this.chunks.filterNot { it.documentId == document.id } + chunks
+        persistCurrentState()
+        graphStore.upsertDocumentGraph(document, chunks)
+    }
+
+    suspend fun removeDocument(documentId: String) = mutex.withLock {
         documents = documents.filterNot { it.id == documentId }
+        val removedChunkKeys = chunks.filter { it.documentId == documentId }.map(::chunkEmbeddingKey).toSet()
         chunks = chunks.filterNot { it.documentId == documentId }
-        persistCurrentState(embeddingModelPath)
+        chunkEmbeddingsByKey = chunkEmbeddingsByKey.filterKeys { key -> key !in removedChunkKeys }
+        persistCurrentState()
+        graphStore.removeDocumentGraph(documentId)
     }
 
-    suspend fun clear(embeddingModelPath: String) = mutex.withLock {
+    suspend fun clear() = mutex.withLock {
         documents = emptyList()
         chunks = emptyList()
-        persistCurrentState(embeddingModelPath)
+        chunkEmbeddingsByKey = emptyMap()
+        persistCurrentState()
+        graphStore.clear()
     }
 
-    suspend fun reindexAll(embeddingModelPath: String) = mutex.withLock {
-        persistCurrentState(embeddingModelPath)
+    suspend fun reindexAll(chunkEmbeddings: Map<String, FloatArray>) = mutex.withLock {
+        chunkEmbeddingsByKey = chunkEmbeddings
+        persistCurrentState()
+    }
+
+    suspend fun rebuildGraphIndex() = mutex.withLock {
+        documents.forEach { document ->
+            graphStore.upsertDocumentGraph(
+                document = document,
+                chunks = chunks.filter { it.documentId == document.id }
+            )
+        }
     }
 
     suspend fun rank(
         backend: RagVectorStoreBackend,
         question: String,
-        embeddingModelPath: String,
+        questionEmbedding: FloatArray?,
         limit: Int = 4
     ): List<RagChunk> = when (backend) {
-        RagVectorStoreBackend.IN_MEMORY -> rankChunks(
-            question = question,
+        RagVectorStoreBackend.IN_MEMORY -> rankChunksWithEmbeddings(
+            questionEmbedding = requireNotNull(questionEmbedding) {
+                "Embedding vector is required for in-memory vector RAG."
+            },
             chunks = chunks,
-            embeddingModelPath = embeddingModelPath,
-            embeddingProvider = embeddingProvider,
+            chunkEmbeddings = chunkEmbeddingsByKey,
             limit = limit
         )
         RagVectorStoreBackend.SQLITE_VEC -> withContext(Dispatchers.IO) {
-            val questionEmbedding = floatArrayToBytes(embeddingProvider.embed(question, embeddingModelPath))
-            val json = RagVectorStoreNative.rank(handle, questionEmbedding, limit)
-            parseChunksJson(json)
+            val vector = requireNotNull(questionEmbedding) {
+                "Embedding vector is required for sqlite-vec RAG."
+            }
+            rankSqliteVec(vector, limit)
         }
+        RagVectorStoreBackend.GRAPH_RAG -> retrieveGraph(
+            question = question,
+            questionEmbedding = requireNotNull(questionEmbedding) {
+                "Embedding vector is required for Graph RAG."
+            },
+            limit = limit
+        ).chunks
     }
 
-    suspend fun canInitializeEmbeddingModel(embeddingModelPath: String): Boolean {
-        return embeddingProvider.canInitialize(embeddingModelPath)
+    internal suspend fun retrieveGraph(
+        question: String,
+        questionEmbedding: FloatArray,
+        limit: Int = 4
+    ): RagGraphRetriever.Retrieval = mutex.withLock {
+        val vectorSeedChunks = withContext(Dispatchers.IO) {
+            rankSqliteVec(questionEmbedding, limit * 3)
+        }
+        graphStore.retrieve(
+            question = question,
+            chunks = chunks,
+            vectorSeedChunks = vectorSeedChunks,
+            limit = limit
+        )
     }
 
-    private suspend fun persistCurrentState(embeddingModelPath: String) {
+    private fun rankSqliteVec(
+        questionEmbedding: FloatArray,
+        limit: Int
+    ): List<RagChunk> {
+        val json = RagVectorStoreNative.rank(handle, floatArrayToBytes(questionEmbedding), limit)
+        return parseChunksJson(json)
+    }
+
+    private suspend fun persistCurrentState() {
         val docIds = documents.map { it.id }.toTypedArray()
         val docNames = documents.map { it.displayName }.toTypedArray()
         val docTexts = documents.map { it.text }.toTypedArray()
@@ -129,7 +203,10 @@ class RagVectorStoreRepository(context: Context) {
         val chunkIndices = chunks.map { it.chunkIndex }.toIntArray()
         val chunkTexts = chunks.map { it.text }.toTypedArray()
         val chunkEmbeddings = chunks.map { chunk ->
-            floatArrayToBytes(embeddingProvider.embed(chunk.text, embeddingModelPath))
+            val key = chunkEmbeddingKey(chunk)
+            val embedding = chunkEmbeddingsByKey[key]
+                ?: throw IllegalStateException("Embedding missing for ${chunk.documentName} / parça ${chunk.chunkIndex + 1}")
+            floatArrayToBytes(embedding)
         }.toTypedArray()
 
         val rc = RagVectorStoreNative.replaceAll(

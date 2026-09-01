@@ -211,7 +211,7 @@ private fun RagScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("RAG Test", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                     Text(
-                        "Üretici model, embedding modeli, dokümanlar ve soru-cevap akışı tek ekranda.",
+                        "Üretici model, dokümanlar ve soru-cevap akışı tek ekranda.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color(0xFF6B7280)
                     )
@@ -237,8 +237,8 @@ private fun RagScreen(
 
             item {
                 ModelSelectionCard(
-                    title = "Anlamsal Arama Modeli (Embedding)",
-                    subtitle = "Soruyu belgelerle eşleştirecek modeli seç.",
+                    title = "Embedding Model",
+                    subtitle = "Doküman ve soru vektörlerini bu modelle üret.",
                     selectedModel = selectedEmbeddingModel,
                     dropdownExpanded = embeddingDropdownExpanded,
                     onDropdownExpandedChange = onEmbeddingDropdownExpandedChange,
@@ -246,8 +246,8 @@ private fun RagScreen(
                     models = embeddingModels,
                     downloadStates = uiState.downloadStates,
                     loadingHint = "Embedding modeli indiriliyor...",
-                    emptyHint = "Bir embedding modeli seç.",
-                    accentColor = Color(0xFF7C3AED),
+                    emptyHint = "Bir embedding model seç.",
+                    accentColor = Color(0xFF10B981),
                     trailingTag = "Embedding"
                 )
             }
@@ -286,9 +286,31 @@ private fun RagScreen(
                                     color = Color(0xFF6B7280)
                                 )
                             }
-                            Button(onClick = onAddDocument) {
+                            Button(
+                                onClick = onAddDocument,
+                                enabled = !uiState.isIndexingDocument
+                            ) {
                                 Text("Dosya Ekle")
                             }
+                        }
+
+                        if (uiState.isIndexingDocument) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                Text(
+                                    text = "${uiState.indexingDocumentName ?: "Belge"} okunuyor ve indexleniyor...",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF6B7280)
+                                )
+                            }
+                        }
+
+                        uiState.errorMessage?.let { error ->
+                            Text(
+                                text = error,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
                         }
 
                         if (uiState.documents.isEmpty()) {
@@ -379,7 +401,8 @@ private fun RagScreen(
                         }
                         Text(
                             text = when {
-                                uiState.selectedGenerationModelId == null || uiState.selectedEmbeddingModelId == null -> "Önce iki modeli de seç."
+                                uiState.selectedGenerationModelId == null -> "Önce bir üretici model seç."
+                                uiState.selectedEmbeddingModelId == null -> "Önce bir embedding model seç."
                                 uiState.documents.isEmpty() -> "Önce bir doküman kaynağı seç."
                                 else -> "Soru hazır."
                             },
@@ -412,6 +435,16 @@ private fun RagScreen(
                             HorizontalDivider()
                             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text("Metrikler", style = MaterialTheme.typography.titleSmall)
+                                Text(
+                                    text = "Üretici model: ${metrics.generationModelName ?: "-"}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF6B7280)
+                                )
+                                Text(
+                                    text = "Embedding model: ${metrics.embeddingModelName ?: "-"}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF6B7280)
+                                )
                                 Text(
                                     text = "Depo: ${metrics.backendName}",
                                     style = MaterialTheme.typography.bodySmall,
@@ -543,12 +576,15 @@ private fun ModelSelectionCard(
                 ) {
                     models.forEach { model ->
                         val downloadState = downloadStates[model.id] ?: DownloadState.Idle
+                        val isSelected = selectedModel?.id == model.id
                         DropdownMenuItem(
                             text = {
                                 Column {
-                                    Text(model.displayName)
                                     Text(
-                                        text = modelMenuSubtitle(model, downloadState),
+                                        if (isSelected) "${model.displayName} (seçili)" else model.displayName
+                                    )
+                                    Text(
+                                        text = modelMenuSubtitle(model, downloadState, isSelected),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = Color(0xFF6B7280)
                                     )
@@ -567,9 +603,9 @@ private fun ModelSelectionCard(
             Text(
                 text = when {
                     selectedModel == null -> emptyHint
-                    selectedState is DownloadState.Success -> "Model hazır."
+                    selectedState is DownloadState.Success -> "Seçili: ${selectedModel.displayName} - hazır."
                     selectedState is DownloadState.Downloading -> loadingHint
-                    else -> "${selectedModel.displayName} seçildi."
+                    else -> "Seçili: ${selectedModel.displayName}"
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = Color(0xFF6B7280)
@@ -604,9 +640,9 @@ private fun VectorStoreSelectionCard(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Vektör Deposu", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text("Retrieval Modu", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "Karşılaştırma için bir depo seç. sqlite-vec seçeneği şimdilik deneysel ve mevcut akışı bozmaz.",
+                    "Karşılaştırma için kaynak bulma yöntemini seç. Graph RAG mevcut akışı bozmadan ayrı çalışır.",
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFF6B7280)
                 )
@@ -715,11 +751,17 @@ private fun downloadDialogContent(
     )
 }
 
-private fun modelMenuSubtitle(model: ModelConfig, downloadState: DownloadState): String {
+private fun modelMenuSubtitle(
+    model: ModelConfig,
+    downloadState: DownloadState,
+    isSelected: Boolean
+): String {
     return when {
         !model.isEnabled -> model.disabledReason ?: "Disabled"
+        downloadState is DownloadState.Success && isSelected -> "Downloaded - selected"
         downloadState is DownloadState.Success -> "Downloaded"
         downloadState is DownloadState.Downloading -> "Downloading ${downloadState.progress}%"
+        isSelected -> "Selected"
         else -> "Not downloaded"
     }
 }
