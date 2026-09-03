@@ -1,12 +1,8 @@
 package com.hilal.llm.rag
 
-import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
-import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
@@ -32,18 +28,11 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -52,44 +41,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import com.hilal.llm.catalog.ModelConfig
 import com.hilal.llm.catalog.download.DownloadState
 import com.hilal.llm.ui.theme.LLMTheme
 
 class RagActivity : ComponentActivity() {
     private val viewModel: RagViewModel by viewModels()
-
-    private val documentPickerLauncher =
-        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            if (uri == null) {
-                viewModel.reportError("Dosya seçilmedi.")
-                return@registerForActivityResult
-            }
-
-            try {
-                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            } catch (_: SecurityException) {
-                // Some providers do not support persisted permissions.
-            }
-
-            val displayName = readDisplayName(uri) ?: "document"
-            lifecycleScope.launch {
-                try {
-                    val text = withContext(Dispatchers.IO) {
-                        readDocumentText(contentResolver, uri, displayName)
-                    }
-                    viewModel.addDocument(displayName = displayName, text = text)
-                } catch (throwable: Throwable) {
-                    viewModel.reportError(buildDocumentErrorMessage("Belge okunamadı", throwable, uri))
-                }
-            }
-        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -100,68 +58,15 @@ class RagActivity : ComponentActivity() {
 
         setContent {
             LLMTheme {
-                val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-                val snackbarHostState = remember { SnackbarHostState() }
-                var generationDropdownExpanded by remember { mutableStateOf(false) }
-                var embeddingDropdownExpanded by remember { mutableStateOf(false) }
-                var vectorStoreDropdownExpanded by remember { mutableStateOf(false) }
-
-                LaunchedEffect(uiState.errorMessage) {
-                    uiState.errorMessage?.let { snackbarHostState.showSnackbar(it) }
-                }
-
-                Scaffold(
-                    snackbarHost = { SnackbarHost(snackbarHostState) }
-                ) { innerPadding ->
-                    RagScreen(
-                        uiState = uiState,
-                        generationDropdownExpanded = generationDropdownExpanded,
-                        embeddingDropdownExpanded = embeddingDropdownExpanded,
-                        vectorStoreDropdownExpanded = vectorStoreDropdownExpanded,
-                        onGenerationDropdownExpandedChange = { generationDropdownExpanded = it },
-                        onEmbeddingDropdownExpandedChange = { embeddingDropdownExpanded = it },
-                        onVectorStoreDropdownExpandedChange = { vectorStoreDropdownExpanded = it },
-                        onGenerationModelSelected = viewModel::selectGenerationModel,
-                        onEmbeddingModelSelected = viewModel::selectEmbeddingModel,
-                        onVectorStoreSelected = viewModel::selectVectorStoreBackend,
-                        onAddDocument = ::openDocumentPicker,
-                        onRemoveDocument = viewModel::removeDocument,
-                        onClearDocuments = viewModel::clearDocuments,
-                        onQuestionChanged = viewModel::updateQuestion,
-                        onAskQuestion = viewModel::askQuestion,
-                        onConfirmDownload = viewModel::confirmSelectedModelDownload,
-                        onDismissDownload = viewModel::dismissDownloadDialog,
-                        modifier = Modifier.padding(innerPadding)
-                    )
-                }
+                RagRoute(viewModel = viewModel)
             }
         }
     }
 
-    private fun openDocumentPicker() {
-        documentPickerLauncher.launch(arrayOf("application/pdf", "text/plain", "text/*"))
-    }
-
-    private fun readDisplayName(uri: Uri): String? {
-        val projection = arrayOf(OpenableColumns.DISPLAY_NAME)
-        contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
-            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (nameIndex >= 0 && cursor.moveToFirst()) {
-                return cursor.getString(nameIndex)
-            }
-        }
-        return null
-    }
-
-    private fun buildDocumentErrorMessage(prefix: String, throwable: Throwable, uri: Uri): String {
-        val errorType = throwable::class.simpleName ?: "Throwable"
-        val message = throwable.message?.takeIf { it.isNotBlank() } ?: "neden bilinmiyor"
-        return "$prefix ($errorType): $message [uri=$uri]"
-    }
 }
 
 @Composable
-private fun RagScreen(
+internal fun RagScreen(
     uiState: RagUiState,
     generationDropdownExpanded: Boolean,
     embeddingDropdownExpanded: Boolean,

@@ -15,7 +15,16 @@ data class RagVectorStoreSnapshot(
 
 internal object RagVectorStoreNative {
     init {
-        System.loadLibrary("rag_sqlitevec")
+        try {
+            System.loadLibrary("rag_sqlitevec")
+            SqliteVecDebugLogger.debug("Native library loaded successfully | library=librag_sqlitevec.so")
+        } catch (throwable: Throwable) {
+            SqliteVecDebugLogger.error(
+                "Native library load FAILED | library=librag_sqlitevec.so | error=${throwable.message}",
+                throwable
+            )
+            throw throwable
+        }
     }
 
     external fun open(path: String): Long
@@ -87,6 +96,13 @@ class RagVectorStoreRepository(context: Context) {
         chunks: List<RagChunk>,
         chunkEmbeddings: List<FloatArray>
     ) = mutex.withLock {
+        val indexingStartedAt = android.os.SystemClock.elapsedRealtime()
+        SqliteVecDebugLogger.debug(
+            "Indexing started | document=${document.displayName} | documentId=${document.id}"
+        )
+        SqliteVecDebugLogger.debug(
+            "chunks=${chunks.size} | embeddingDimension=${chunkEmbeddings.firstOrNull()?.size ?: 0}"
+        )
         documents = documents.filterNot { it.id == document.id } + document
         this.chunks = this.chunks.filterNot { it.documentId == document.id } + chunks
         chunkEmbeddingsByKey = chunkEmbeddingsByKey.toMutableMap().apply {
@@ -95,6 +111,10 @@ class RagVectorStoreRepository(context: Context) {
             }
         }
         persistCurrentState()
+        SqliteVecDebugLogger.debug(
+            "Indexing completed | document=${document.displayName} | vectors inserted=${chunks.size} | " +
+                "elapsedMs=${android.os.SystemClock.elapsedRealtime() - indexingStartedAt}"
+        )
         graphStore.upsertDocumentGraph(document, chunks)
     }
 
@@ -157,6 +177,10 @@ class RagVectorStoreRepository(context: Context) {
             val vector = requireNotNull(questionEmbedding) {
                 "Embedding vector is required for sqlite-vec RAG."
             }
+            SqliteVecDebugLogger.debug("Retrieval started | backend=SQLITE_VEC")
+            SqliteVecDebugLogger.debug(
+                "queryEmbeddingDimension=${vector.size} | requestedK=$limit"
+            )
             rankSqliteVec(vector, limit)
         }
         RagVectorStoreBackend.GRAPH_RAG -> retrieveGraph(
@@ -173,6 +197,7 @@ class RagVectorStoreRepository(context: Context) {
         questionEmbedding: FloatArray,
         limit: Int = 4
     ): RagGraphRetriever.Retrieval = mutex.withLock {
+        SqliteVecDebugLogger.debug("GRAPH_RAG seed retrieval via sqlite-vec | seedK=${limit * 3}")
         val vectorSeedChunks = withContext(Dispatchers.IO) {
             rankSqliteVec(questionEmbedding, limit * 3)
         }
@@ -188,8 +213,16 @@ class RagVectorStoreRepository(context: Context) {
         questionEmbedding: FloatArray,
         limit: Int
     ): List<RagChunk> {
+        val startedAt = android.os.SystemClock.elapsedRealtime()
+        SqliteVecDebugLogger.debug("Kotlin -> JNI | operation=KNN")
         val json = RagVectorStoreNative.rank(handle, floatArrayToBytes(questionEmbedding), limit)
-        return parseChunksJson(json)
+        val results = parseChunksJson(json)
+        SqliteVecDebugLogger.debug("JNI -> Kotlin | operation=KNN | results=${results.size}")
+        SqliteVecDebugLogger.debug(
+            "KNN completed | resultCount=${results.size} | " +
+                "elapsedMs=${android.os.SystemClock.elapsedRealtime() - startedAt}"
+        )
+        return results
     }
 
     private suspend fun persistCurrentState() {
@@ -209,6 +242,9 @@ class RagVectorStoreRepository(context: Context) {
             floatArrayToBytes(embedding)
         }.toTypedArray()
 
+        SqliteVecDebugLogger.debug(
+            "Kotlin -> JNI | operation=REPLACE_ALL | documents=${documents.size} | vectors=${chunks.size}"
+        )
         val rc = RagVectorStoreNative.replaceAll(
             handle = handle,
             docIds = docIds,
@@ -222,8 +258,12 @@ class RagVectorStoreRepository(context: Context) {
             chunkEmbeddings = chunkEmbeddings
         )
         if (rc != 0) {
+            SqliteVecDebugLogger.error("JNI -> Kotlin | operation=REPLACE_ALL | FAILED | rc=$rc")
             throw IllegalStateException("sqlite-vec store update failed with code $rc")
         }
+        SqliteVecDebugLogger.debug(
+            "JNI -> Kotlin | operation=REPLACE_ALL | SUCCESS | vectors=${chunks.size}"
+        )
     }
 
     private fun loadSnapshotFromNative() {

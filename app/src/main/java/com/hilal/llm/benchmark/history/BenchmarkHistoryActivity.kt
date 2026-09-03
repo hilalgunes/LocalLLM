@@ -22,30 +22,19 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hilal.llm.benchmark.BenchmarkResult
 import com.hilal.llm.benchmark.ResponseQuality
 import com.hilal.llm.benchmark.SelectionSource
 import com.hilal.llm.catalog.RuntimeType
 import com.hilal.llm.ui.theme.LLMTheme
-import androidx.core.content.FileProvider
-import android.content.Intent
-import android.content.ClipData
 
 class BenchmarkHistoryActivity : ComponentActivity() {
     private val viewModel: BenchmarkHistoryViewModel by viewModels()
@@ -55,61 +44,14 @@ class BenchmarkHistoryActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             LLMTheme {
-                val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-                val snackbarHostState = remember { SnackbarHostState() }
-                val context = LocalContext.current
-                LaunchedEffect(Unit) {
-                    viewModel.loadResults()
-                }
-                LaunchedEffect(Unit) {
-                    viewModel.exportEvents.collect { event ->
-                        when (event) {
-                            is BenchmarkExportEvent.ShareFile -> {
-                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                    type = event.mimeType
-                                    putExtra(Intent.EXTRA_STREAM, event.uri)
-                                    putExtra(Intent.EXTRA_SUBJECT, event.fileName)
-                                    clipData = ClipData.newRawUri(event.fileName, event.uri)
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                }
-                                val chooser = Intent.createChooser(shareIntent, "Share benchmark export")
-                                chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                context.startActivity(chooser)
-                            }
-                            is BenchmarkExportEvent.Message -> {
-                                snackbarHostState.showSnackbar(event.text)
-                            }
-                            is BenchmarkExportEvent.Error -> {
-                                snackbarHostState.showSnackbar(event.text)
-                            }
-                        }
-                    }
-                }
-                LaunchedEffect(uiState.errorMessage) {
-                    uiState.errorMessage?.let { snackbarHostState.showSnackbar(it) }
-                }
-                Scaffold(
-                    snackbarHost = { SnackbarHost(snackbarHostState) }
-                ) { innerPadding ->
-                    BenchmarkAnalyticsScreen(
-                        uiState = uiState,
-                        onRuntimeFilterSelected = viewModel::setRuntimeFilter,
-                        onSourceFilterSelected = viewModel::setSourceFilter,
-                        onToggleCompare = viewModel::toggleCompareSelection,
-                        onQualityChanged = viewModel::updateQuality,
-                        onExportCsv = viewModel::exportCsv,
-                        onExportJson = viewModel::exportJson,
-                        onClearCompare = viewModel::clearCompareSelection,
-                        modifier = Modifier.padding(innerPadding)
-                    )
-                }
+                BenchmarkHistoryRoute(viewModel = viewModel)
             }
         }
     }
 }
 
 @Composable
-private fun BenchmarkAnalyticsScreen(
+internal fun BenchmarkAnalyticsScreen(
     uiState: BenchmarkHistoryUiState,
     onRuntimeFilterSelected: (RuntimeType?) -> Unit,
     onSourceFilterSelected: (SelectionSource?) -> Unit,

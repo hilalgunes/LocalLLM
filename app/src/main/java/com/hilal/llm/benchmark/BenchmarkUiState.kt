@@ -1,9 +1,11 @@
 package com.hilal.llm.benchmark
 
 import com.hilal.llm.catalog.BenchmarkModelSelection
+import com.hilal.llm.catalog.ModelConfig
+import com.hilal.llm.catalog.download.DownloadState
 
 data class BenchmarkUiState(
-    val selectedEngineType: EngineType = EngineType.FAKE,
+    val selectedEngineType: EngineType = EngineType.LLAMA_CPP,
     val selectedModel: LlmModelInfo? = null,
     val selectedCatalogModel: BenchmarkModelSelection? = null,
     val selectedPreset: BenchmarkPreset? = null,
@@ -20,5 +22,10 @@ data class BenchmarkUiState(
     val draftQualityNote: String = "",
     val isRunning: Boolean = false,
     val completedResults: List<BenchmarkResult> = emptyList(),
+    val availableModels: List<ModelConfig> = emptyList(),
+    val modelDownloadStates: Map<String, DownloadState> = emptyMap(),
+    val selectedModelConfig: ModelConfig? = null,
+    val isModelPickerVisible: Boolean = false,
+    val activeDownloadModelId: String? = null,
     val createdAt: Long = System.currentTimeMillis()
 )

@@ -1,10 +1,26 @@
 #include <jni.h>
 #include <sqlite3.h>
+#include <android/log.h>
 
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+#ifndef NDEBUG
+#define SQLITE_VEC_LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, "SQLITE_VEC_DEBUG", "SQLITE_VEC_DEBUG | " __VA_ARGS__)
+#define SQLITE_VEC_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "SQLITE_VEC_DEBUG", "SQLITE_VEC_DEBUG | " __VA_ARGS__)
+#else
+#define SQLITE_VEC_LOGD(...) ((void)0)
+#define SQLITE_VEC_LOGE(...) ((void)0)
+#endif
+
+static long long elapsed_realtime_ms(void) {
+    struct timespec value;
+    clock_gettime(CLOCK_MONOTONIC, &value);
+    return (long long)value.tv_sec * 1000LL + value.tv_nsec / 1000000LL;
+}
 
 static const char *kDocumentsSql =
     "CREATE TABLE IF NOT EXISTS rag_documents ("
@@ -91,7 +107,29 @@ static int create_chunks_table(sqlite3 *db, int dimension) {
              "text TEXT"
              ")",
              dimension);
-    return exec_sql(db, sql);
+    SQLITE_VEC_LOGD("Creating/opening vec0 table | table=rag_chunks | dimensions=%d", dimension);
+    int rc = exec_sql(db, sql);
+    if (rc == SQLITE_OK) {
+        SQLITE_VEC_LOGD("vec0 table ready | table=rag_chunks | dimensions=%d", dimension);
+    } else {
+        SQLITE_VEC_LOGE("vec0 table FAILED | table=rag_chunks | dimensions=%d | rc=%d | error=%s",
+                        dimension, rc, sqlite3_errmsg(db));
+    }
+    return rc;
+}
+
+static void log_runtime_versions(sqlite3 *db) {
+    SQLITE_VEC_LOGD("SQLite version: %s | sourceId=%s", sqlite3_libversion(), sqlite3_sourceid());
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(db, "SELECT vec_version();", -1, &stmt, NULL);
+    if (rc == SQLITE_OK && sqlite3_step(stmt) == SQLITE_ROW) {
+        const unsigned char *version = sqlite3_column_text(stmt, 0);
+        SQLITE_VEC_LOGD("sqlite-vec initialization SUCCESS | runtimeVersion=%s",
+                        version != NULL ? (const char *)version : "unknown");
+    } else {
+        SQLITE_VEC_LOGE("sqlite-vec initialization FAILED | rc=%d | error=%s", rc, sqlite3_errmsg(db));
+    }
+    if (stmt != NULL) sqlite3_finalize(stmt);
 }
 
 static int read_vector_dimension(sqlite3 *db) {
@@ -151,6 +189,51 @@ static int ensure_schema(sqlite3 *db) {
     return rc;
 }
 
+static int initialize_fresh_schema(sqlite3 *db, int dimension) {
+    int rc = exec_sql(db, "PRAGMA journal_mode=WAL;");
+    if (rc != SQLITE_OK) return rc;
+    rc = exec_sql(db, "PRAGMA synchronous=NORMAL;");
+    if (rc != SQLITE_OK) return rc;
+    rc = exec_sql(db, kDocumentsSql);
+    if (rc != SQLITE_OK) return rc;
+    rc = exec_sql(db, kMetaSql);
+    if (rc != SQLITE_OK) return rc;
+    rc = create_chunks_table(db, dimension);
+    if (rc != SQLITE_OK) return rc;
+    return write_vector_dimension(db, dimension);
+}
+
+static int recreate_vector_store(RagNativeStore *store, int dimension) {
+    const char *currentPath = sqlite3_db_filename(store->db, "main");
+    char *dbPath = currentPath != NULL ? sqlite3_mprintf("%s", currentPath) : NULL;
+    if (dbPath == NULL) return SQLITE_NOMEM;
+
+    int rc = sqlite3_close(store->db);
+    if (rc != SQLITE_OK) {
+        sqlite3_free(dbPath);
+        return rc;
+    }
+    store->db = NULL;
+
+    char *walPath = sqlite3_mprintf("%s-wal", dbPath);
+    char *shmPath = sqlite3_mprintf("%s-shm", dbPath);
+    (void)remove(dbPath);
+    if (walPath != NULL) (void)remove(walPath);
+    if (shmPath != NULL) (void)remove(shmPath);
+    sqlite3_free(walPath);
+    sqlite3_free(shmPath);
+
+    rc = sqlite3_open(dbPath, &store->db);
+    sqlite3_free(dbPath);
+    if (rc != SQLITE_OK) return rc;
+
+    rc = initialize_fresh_schema(store->db, dimension);
+    if (rc == SQLITE_OK) {
+        store->vector_dimension = dimension;
+    }
+    return rc;
+}
+
 static int begin_tx(sqlite3 *db) {
     return exec_sql(db, "BEGIN IMMEDIATE TRANSACTION;");
 }
@@ -177,32 +260,17 @@ static void throw_sqlite_stage_error(JNIEnv *env, sqlite3 *db, const char *stage
 }
 
 static int clear_vec0_rows(sqlite3 *db) {
-    sqlite3_stmt *selectStmt = NULL;
     sqlite3_stmt *deleteStmt = NULL;
-    int rc = sqlite3_prepare_v2(db, "SELECT rowid FROM rag_chunks;", -1, &selectStmt, NULL);
+    int rc = sqlite3_prepare_v2(db, "DELETE FROM rag_chunks;", -1, &deleteStmt, NULL);
     if (rc != SQLITE_OK) {
+        SQLITE_VEC_LOGD("vec0 clear prepare unsupported | rc=%d | error=%s", rc, sqlite3_errmsg(db));
         return rc;
     }
 
-    rc = sqlite3_prepare_v2(db, "DELETE FROM rag_chunks WHERE rowid = ?;", -1, &deleteStmt, NULL);
-    if (rc != SQLITE_OK) {
-        sqlite3_finalize(selectStmt);
-        return rc;
+    rc = sqlite3_step(deleteStmt);
+    if (rc != SQLITE_DONE) {
+        SQLITE_VEC_LOGD("vec0 clear step unsupported | rc=%d | error=%s", rc, sqlite3_errmsg(db));
     }
-
-    while ((rc = sqlite3_step(selectStmt)) == SQLITE_ROW) {
-        sqlite3_int64 rowid = sqlite3_column_int64(selectStmt, 0);
-        sqlite3_reset(deleteStmt);
-        sqlite3_clear_bindings(deleteStmt);
-        sqlite3_bind_int64(deleteStmt, 1, rowid);
-        rc = sqlite3_step(deleteStmt);
-        if (rc != SQLITE_DONE) {
-            break;
-        }
-        rc = SQLITE_OK;
-    }
-
-    sqlite3_finalize(selectStmt);
     sqlite3_finalize(deleteStmt);
     return rc == SQLITE_DONE ? SQLITE_OK : rc;
 }
@@ -223,6 +291,7 @@ Java_com_hilal_llm_rag_RagVectorStoreNative_open(JNIEnv *env, jobject thiz, jstr
         return 0;
     }
 
+    SQLITE_VEC_LOGD("Opening vector store");
     int rc = sqlite3_open(db_path, &store->db);
     free(db_path);
     if (rc != SQLITE_OK) {
@@ -232,6 +301,8 @@ Java_com_hilal_llm_rag_RagVectorStoreNative_open(JNIEnv *env, jobject thiz, jstr
         free(store);
         return 0;
     }
+
+    log_runtime_versions(store->db);
 
     rc = ensure_schema(store->db);
     if (rc != SQLITE_OK) {
@@ -287,6 +358,7 @@ Java_com_hilal_llm_rag_RagVectorStoreNative_replaceAll(
         return SQLITE_ERROR;
     }
 
+    long long indexingStartedAt = elapsed_realtime_ms();
     jsize docCount = docIds != NULL ? (*env)->GetArrayLength(env, docIds) : 0;
     jsize chunkCount = chunkDocIds != NULL ? (*env)->GetArrayLength(env, chunkDocIds) : 0;
     int vectorDimension = store->vector_dimension > 0 ? store->vector_dimension : 384;
@@ -308,6 +380,12 @@ Java_com_hilal_llm_rag_RagVectorStoreNative_replaceAll(
         }
         store->vector_dimension = vectorDimension;
     }
+    SQLITE_VEC_LOGD("Native indexing started | documents=%d | chunks=%d | embeddingDimension=%d",
+                    (int)docCount, (int)chunkCount, vectorDimension);
+    if (docCount == 0 && chunkCount == 0) {
+        SQLITE_VEC_LOGD("Clearing vector store");
+    }
+    int insertedVectorCount = 0;
     jint *docCounts = docChunkCounts != NULL ? (*env)->GetIntArrayElements(env, docChunkCounts, NULL) : NULL;
     jint *indices = chunkIndices != NULL ? (*env)->GetIntArrayElements(env, chunkIndices, NULL) : NULL;
 
@@ -321,6 +399,16 @@ Java_com_hilal_llm_rag_RagVectorStoreNative_replaceAll(
 
     const char *errorStage = "delete rag_chunks";
     rc = clear_vec0_rows(store->db);
+    if (rc == SQLITE_ERROR) {
+        SQLITE_VEC_LOGD("vec0 DELETE unsupported; recreating vector store | dimensions=%d", vectorDimension);
+        maybe_rollback(store->db);
+        errorStage = "recreate vector store after vec0 delete failure";
+        rc = recreate_vector_store(store, vectorDimension);
+        if (rc == SQLITE_OK) {
+            errorStage = "begin transaction after vector store recreation";
+            rc = begin_tx(store->db);
+        }
+    }
     if (rc == SQLITE_OK) {
         errorStage = "delete rag_documents";
         rc = exec_sql(store->db, "DELETE FROM rag_documents;");
@@ -411,6 +499,7 @@ Java_com_hilal_llm_rag_RagVectorStoreNative_replaceAll(
             if (rc != SQLITE_DONE) {
                 break;
             }
+            insertedVectorCount++;
             rc = SQLITE_OK;
         }
     }
@@ -429,7 +518,15 @@ Java_com_hilal_llm_rag_RagVectorStoreNative_replaceAll(
     if (indices != NULL) (*env)->ReleaseIntArrayElements(env, chunkIndices, indices, JNI_ABORT);
 
     if (rc != SQLITE_OK) {
+        SQLITE_VEC_LOGE("Native indexing FAILED | stage=%s | rc=%d | inserted=%d | error=%s",
+                        errorStage, rc, insertedVectorCount, sqlite3_errmsg(store->db));
         throw_sqlite_stage_error(env, store->db, errorStage, rc);
+    } else {
+        SQLITE_VEC_LOGD("Native indexing completed | vectors inserted=%d | elapsedMs=%lld",
+                        insertedVectorCount, elapsed_realtime_ms() - indexingStartedAt);
+        if (docCount == 0 && chunkCount == 0) {
+            SQLITE_VEC_LOGD("Vector store cleared | vectors=0");
+        }
     }
 
     return rc;
@@ -524,6 +621,7 @@ Java_com_hilal_llm_rag_RagVectorStoreNative_rank(
         return NULL;
     }
 
+    long long knnStartedAt = elapsed_realtime_ms();
     jbyte *embeddingBytes = (*env)->GetByteArrayElements(env, questionEmbedding, NULL);
     jsize embeddingLen = (*env)->GetArrayLength(env, questionEmbedding);
     if (embeddingBytes == NULL) {
@@ -535,10 +633,12 @@ Java_com_hilal_llm_rag_RagVectorStoreNative_rank(
         throw_runtime(env, "question embedding dimension does not match sqlite-vec index dimension");
         return NULL;
     }
+    SQLITE_VEC_LOGD("Executing sqlite-vec KNN | table=rag_chunks | queryDimension=%d | requestedK=%d",
+                    (int)(embeddingLen / 4), (int)limit);
 
     sqlite3_stmt *stmt = NULL;
     const char *sql =
-        "SELECT document_id, document_name, chunk_index, text "
+        "SELECT document_id, document_name, chunk_index, text, distance "
         "FROM rag_chunks "
         "WHERE embedding MATCH ? "
         "ORDER BY distance "
@@ -557,6 +657,7 @@ Java_com_hilal_llm_rag_RagVectorStoreNative_rank(
     sqlite3_str *json = sqlite3_str_new(store->db);
     sqlite3_str_appendall(json, "[");
     int first = 1;
+    int resultCount = 0;
     while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
         if (!first) sqlite3_str_appendall(json, ",");
         first = 0;
@@ -567,15 +668,25 @@ Java_com_hilal_llm_rag_RagVectorStoreNative_rank(
         sqlite3_str_appendf(json, ",\"chunkIndex\":%d,\"text\":", sqlite3_column_int(stmt, 2));
         json_append_escaped(json, sqlite3_column_text(stmt, 3));
         sqlite3_str_appendall(json, "}");
+        SQLITE_VEC_LOGD("result[%d] | documentId=%s | documentName=%s | chunkIndex=%d | distance=%.8f",
+                        resultCount,
+                        sqlite3_column_text(stmt, 0) != NULL ? (const char *)sqlite3_column_text(stmt, 0) : "",
+                        sqlite3_column_text(stmt, 1) != NULL ? (const char *)sqlite3_column_text(stmt, 1) : "",
+                        sqlite3_column_int(stmt, 2),
+                        sqlite3_column_double(stmt, 4));
+        resultCount++;
     }
     sqlite3_str_appendall(json, "]");
     sqlite3_finalize(stmt);
 
     if (rc != SQLITE_DONE) {
+        SQLITE_VEC_LOGE("KNN FAILED | rc=%d | error=%s", rc, sqlite3_errmsg(store->db));
         sqlite3_str_finish(json);
         throw_runtime(env, sqlite3_errmsg(store->db));
         return NULL;
     }
+    SQLITE_VEC_LOGD("KNN native completed | resultCount=%d | elapsedMs=%lld",
+                    resultCount, elapsed_realtime_ms() - knnStartedAt);
 
     char *result = sqlite3_str_finish(json);
     if (result == NULL) {
@@ -590,6 +701,13 @@ Java_com_hilal_llm_rag_RagVectorStoreNative_rank(
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
     (void)vm;
     (void)reserved;
-    sqlite3_auto_extension((void (*)(void))sqlite3_vec_init);
+    SQLITE_VEC_LOGD("Native library loaded | library=librag_sqlitevec.so");
+    SQLITE_VEC_LOGD("sqlite-vec initialization started | operation=sqlite3_auto_extension registration");
+    int rc = sqlite3_auto_extension((void (*)(void))sqlite3_vec_init);
+    if (rc != SQLITE_OK) {
+        SQLITE_VEC_LOGE("sqlite-vec initialization FAILED | operation=auto_extension registration | rc=%d", rc);
+        return JNI_ERR;
+    }
+    SQLITE_VEC_LOGD("sqlite-vec auto-extension registration SUCCESS");
     return JNI_VERSION_1_6;
 }

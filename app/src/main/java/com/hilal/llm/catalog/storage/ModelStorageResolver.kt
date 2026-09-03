@@ -9,7 +9,11 @@ class ModelStorageResolver(
     private val context: Context
 ) {
     fun getModelDir(config: ModelConfig): File {
-        return File(File(context.filesDir, MODELS_DIR_NAME), config.id)
+        val modelsDir = File(context.filesDir, MODELS_DIR_NAME)
+        val runtimeDir = File(modelsDir, config.runtimeType.name.lowercase())
+        val modelDir = File(runtimeDir, config.id)
+        migrateLegacyModelDirIfNeeded(config, modelDir)
+        return modelDir
     }
 
     fun ensureModelDir(config: ModelConfig): File {
@@ -46,6 +50,18 @@ class ModelStorageResolver(
             return true
         }
         return modelDir.deleteRecursively()
+    }
+
+    private fun migrateLegacyModelDirIfNeeded(config: ModelConfig, modelDir: File) {
+        if (modelDir.exists()) return
+        val legacyDir = File(File(context.filesDir, MODELS_DIR_NAME), config.id)
+        if (!legacyDir.exists()) return
+
+        modelDir.parentFile?.mkdirs()
+        if (!legacyDir.renameTo(modelDir)) {
+            legacyDir.copyRecursively(modelDir, overwrite = true)
+            legacyDir.deleteRecursively()
+        }
     }
 
     private fun ModelFileConfig.toLocalFile(modelDir: File): ModelLocalFile {

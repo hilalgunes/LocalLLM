@@ -365,7 +365,8 @@ object ModelCatalogRepository {
             estimatedSize = "~639 MB",
             quantization = "Q8_0",
             isEnabled = true,
-            disabledReason = null
+            disabledReason = null,
+            purpose = ModelPurpose.EMBEDDING
         ),
         ModelConfig(
             id = "gecko-110m-en-256-litert",
@@ -394,7 +395,8 @@ object ModelCatalogRepository {
             estimatedSize = "~115 MB",
             quantization = "dynamic INT8",
             isEnabled = true,
-            disabledReason = null
+            disabledReason = null,
+            purpose = ModelPurpose.EMBEDDING
         ),
         ModelConfig(
             id = "multilingual-e5-small-gguf",
@@ -416,7 +418,8 @@ object ModelCatalogRepository {
             estimatedSize = "~132 MB",
             quantization = "Q8_0",
             isEnabled = true,
-            disabledReason = null
+            disabledReason = null,
+            purpose = ModelPurpose.EMBEDDING
         ),
         ModelConfig(
             id = "all-minilm-l6-v2-gguf",
@@ -438,7 +441,8 @@ object ModelCatalogRepository {
             estimatedSize = "~24.7 MB",
             quantization = "Q8_0",
             isEnabled = true,
-            disabledReason = null
+            disabledReason = null,
+            purpose = ModelPurpose.EMBEDDING
         )
     )
 

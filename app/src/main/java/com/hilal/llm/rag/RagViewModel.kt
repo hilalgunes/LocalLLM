@@ -70,7 +70,6 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
     )
     private var llamaEngine: LocalLlmEngine? = null
     private var liteRtEngine: LocalLlmEngine? = null
-    private var mediaPipeEngine: LocalLlmEngine? = null
     private var execuTorchEngine: LocalLlmEngine? = null
     private var contentResolver: ContentResolver? = null
     private var engineFactory: LocalLlmEngineFactory = LocalLlmEngineFactory(
@@ -87,7 +86,6 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
         this.contentResolver = contentResolver
         initializeLlamaEngine(contentResolver)
         initializeLiteRtEngine(contentResolver)
-        initializeMediaPipeEngine(contentResolver)
         initializeExecuTorchEngine(contentResolver)
         viewModelScope.launch {
             try {
@@ -785,13 +783,6 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
             contentResolver = contentResolver
         )
         refreshEngineFactory()
-    }
-
-    private fun initializeMediaPipeEngine(contentResolver: ContentResolver) {
-        mediaPipeEngine = com.hilal.llm.benchmark.MediaPipeLlmEngine(
-            appContext = appContext,
-            contentResolver = contentResolver
-        )
     }
 
     private fun initializeExecuTorchEngine(contentResolver: ContentResolver) {
