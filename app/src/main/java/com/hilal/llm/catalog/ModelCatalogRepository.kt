@@ -241,6 +241,28 @@ object ModelCatalogRepository {
             disabledReason = null
         ),
         ModelConfig(
+            id = "gemma-4-e4b-it-litert-lm",
+            displayName = "Gemma 4 E4B IT LiteRT-LM",
+            description = "Gemma 4 E4B instruction-tuned model packaged for on-device LiteRT-LM inference.",
+            runtimeType = RuntimeType.LITERT,
+            engineType = EngineType.LITERT_LM,
+            promptTemplateType = PromptTemplateType.GEMMA,
+            files = listOf(
+                ModelFileConfig(
+                    type = ModelFileType.LITERT_TASK,
+                    fileName = "gemma-4-E4B-it.litertlm",
+                    url = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm",
+                    required = true,
+                    description = "Primary Gemma 4 E4B LiteRT-LM bundle.",
+                    minBytes = 3_600_000_000L
+                )
+            ),
+            estimatedSize = "~3.66 GB",
+            quantization = "LiteRT",
+            isEnabled = true,
+            disabledReason = null
+        ),
+        ModelConfig(
             id = "qwen3-0.6b-litert",
             displayName = "Qwen3 0.6B LiteRT-LM",
             description = "LiteRT-LM Qwen3 export with mixed INT4 weights and float KV cache.",
@@ -271,13 +293,13 @@ object ModelCatalogRepository {
             files = listOf(
                 ModelFileConfig(
                     type = ModelFileType.LITERT_TASK,
-                    fileName = "qwen35_2b.litertlm",
-                    url = "https://huggingface.co/paulsp94/Qwen3.5-2B-LiteRT-LM/resolve/main/qwen35_2b.litertlm",
+                    fileName = "Qwen3.5-2B_int8.litertlm",
+                    url = "https://huggingface.co/litert-community/Qwen3.5-2B/resolve/main/Qwen3.5-2B_int8.litertlm",
                     required = true,
                     description = "Primary LiteRT-LM text-only bundle file."
                 )
             ),
-            estimatedSize = "~1.9 GB",
+            estimatedSize = "~2.12 GB",
             quantization = "int8 dynamic",
             isEnabled = true,
             disabledReason = null

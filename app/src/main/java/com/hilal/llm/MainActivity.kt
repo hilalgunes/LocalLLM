@@ -65,6 +65,8 @@ import com.hilal.llm.navigation.MainBottomNavigation
 import com.hilal.llm.navigation.MainDestination
 import com.hilal.llm.rag.RagRoute
 import com.hilal.llm.rag.RagViewModel
+import com.hilal.llm.test.TestRoute
+import com.hilal.llm.test.TestViewModel
 import com.hilal.llm.ui.theme.LLMTheme
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -75,6 +77,7 @@ class MainActivity : ComponentActivity() {
     private val viewModel: BenchmarkViewModel by viewModels()
     private val ragViewModel: RagViewModel by viewModels()
     private val historyViewModel: BenchmarkHistoryViewModel by viewModels()
+    private val testViewModel: TestViewModel by viewModels()
 
     private val modelPickerLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -180,6 +183,12 @@ class MainActivity : ComponentActivity() {
                         }
                         composable(MainDestination.RAG.route) {
                             RagRoute(viewModel = ragViewModel)
+                        }
+                        composable(MainDestination.TEST.route) {
+                            TestRoute(
+                                testViewModel = testViewModel,
+                                benchmarkViewModel = viewModel
+                            )
                         }
                         composable(MainDestination.HISTORY.route) {
                             BenchmarkHistoryRoute(viewModel = historyViewModel)

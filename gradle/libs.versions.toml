@@ -9,13 +9,15 @@ activityCompose = "1.13.0"
 kotlin = "2.2.10"
 composeBom = "2024.09.00"
 llamacppKotlin = "0.4.0"
-liteRtLmAndroid = "0.13.1"
+liteRtLmAndroid = "0.16.1"
 executorchAndroid = "1.2.0"
 pdfboxAndroid = "2.0.27.0"
 room = "2.8.4"
 ksp = "2.2.10-2.0.2"
 localAgentsRag = "0.1.0"
 navigationCompose = "2.9.5"
+retrofit = "2.11.0"
+okhttp = "4.12.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -44,6 +46,10 @@ androidx-room-runtime = { group = "androidx.room", name = "room-runtime", versio
 androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
 localagents-rag = { group = "com.google.ai.edge.localagents", name = "localagents-rag", version.ref = "localAgentsRag" }
+retrofit = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = "retrofit" }
+retrofit-converter-gson = { group = "com.squareup.retrofit2", name = "converter-gson", version.ref = "retrofit" }
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+okhttp-logging-interceptor = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

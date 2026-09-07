@@ -5,6 +5,7 @@ import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Science
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -24,6 +25,7 @@ enum class MainDestination(
     RUN("run", "Run", Icons.Default.PlayArrow),
     COMPARE("compare", "Compare", Icons.AutoMirrored.Filled.CompareArrows),
     RAG("rag", "RAG", Icons.Default.AccountTree),
+    TEST("test", "Test", Icons.Default.Science),
     HISTORY("history", "History", Icons.Default.History)
 }
 

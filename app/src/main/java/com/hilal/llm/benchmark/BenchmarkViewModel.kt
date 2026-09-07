@@ -25,6 +25,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.atomic.AtomicBoolean
 
 class BenchmarkViewModel : ViewModel() {
     companion object {
@@ -51,6 +54,7 @@ class BenchmarkViewModel : ViewModel() {
     private var modelDownloadRepository: ModelDownloadRepository? = null
     private var modelRunFileMapper: ModelRunFileMapper? = null
     private var activeDownloadJob: Job? = null
+    private val featureGenerationMutex = Mutex()
     private val _uiState = MutableStateFlow(BenchmarkUiState())
     val uiState: StateFlow<BenchmarkUiState> = _uiState.asStateFlow()
 
@@ -513,6 +517,98 @@ class BenchmarkViewModel : ViewModel() {
                 }
             )
         }
+    }
+
+    suspend fun generateForFeature(
+        selection: BenchmarkModelSelection,
+        prompt: String,
+        maxTokens: Int
+    ): String = featureGenerationMutex.withLock {
+        validateCatalogSelectionForRun(selection)?.let { throw IllegalStateException(it) }
+        val engine = resolveEngineForRun(selection)
+        generateFeatureText(selection, prompt, maxTokens, engine::generate)
+    }
+
+    suspend fun openFeatureGenerationSession(
+        selection: BenchmarkModelSelection
+    ): FeatureGenerationSession {
+        validateCatalogSelectionForRun(selection)?.let { throw IllegalStateException(it) }
+        featureGenerationMutex.lock()
+        try {
+            val reusableLiteRtSession = if (selection.runtimeType == RuntimeType.LITERT) {
+                (liteRtEngine as? LiteRtLlmEngine)?.openSession(selection.modelPath)
+                    ?: throw IllegalStateException("LiteRT engine is not initialized.")
+            } else {
+                null
+            }
+            val closed = AtomicBoolean(false)
+            return object : FeatureGenerationSession {
+                override suspend fun generate(prompt: String, maxTokens: Int): String {
+                    check(!closed.get()) { "Feature generation session is already closed." }
+                    val generateRequest: suspend (BenchmarkPrompt, StreamCallback) -> Unit =
+                        reusableLiteRtSession?.let { session -> session::generate }
+                            ?: resolveEngineForRun(selection)::generate
+                    return generateFeatureText(
+                        selection = selection,
+                        prompt = prompt,
+                        maxTokens = maxTokens,
+                        generateRequest = generateRequest
+                    )
+                }
+
+                override suspend fun close() {
+                    if (!closed.compareAndSet(false, true)) return
+                    try {
+                        reusableLiteRtSession?.close()
+                    } finally {
+                        featureGenerationMutex.unlock()
+                    }
+                }
+            }
+        } catch (error: Throwable) {
+            featureGenerationMutex.unlock()
+            throw error
+        }
+    }
+
+    private suspend fun generateFeatureText(
+        selection: BenchmarkModelSelection,
+        prompt: String,
+        maxTokens: Int,
+        generateRequest: suspend (BenchmarkPrompt, StreamCallback) -> Unit
+    ): String {
+        val output = StringBuffer()
+        var generationError: Throwable? = null
+        val request = BenchmarkPrompt(
+                modelId = selection.modelId,
+                modelName = selection.displayName,
+                modelFilePath = selection.modelPath,
+                tokenizerFilePath = selection.tokenizerPath,
+                modelDisplayName = selection.displayName,
+                runtimeType = selection.runtimeType,
+                engineType = selection.engineType,
+                promptTemplateType = selection.promptTemplateType,
+                selectionSource = SelectionSource.CATALOG,
+                prompt = prompt,
+                maxTokens = maxTokens.coerceIn(MIN_MAX_TOKENS, MAX_MAX_TOKENS)
+            )
+        val callback = object : StreamCallback {
+                override fun onFirstToken() = Unit
+
+                override fun onToken(token: String) {
+                    output.append(token)
+                }
+
+                override fun onComplete() = Unit
+
+                override fun onError(throwable: Throwable) {
+                    generationError = throwable
+                }
+            }
+        generateRequest(request, callback)
+        generationError?.let { throw it }
+        return output.toString().trim().takeIf { it.isNotEmpty() }
+            ?: throw IllegalStateException("Local model boş yanıt üretti.")
     }
 
     fun updateDraftResponseQuality(quality: ResponseQuality) {

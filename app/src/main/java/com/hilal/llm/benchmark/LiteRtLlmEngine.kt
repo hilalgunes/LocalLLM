@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.os.SystemClock
 import android.util.Log
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Conversation
@@ -16,8 +17,12 @@ import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.SamplerConfig
 import java.io.File
 import java.io.FileOutputStream
+import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
@@ -28,6 +33,8 @@ class LiteRtLlmEngine(
 ) : LocalLlmEngine {
     companion object {
         private const val TAG = "LiteRtLlmEngine"
+        private const val PERF_TAG = "LITERT_PERF"
+        private const val THREAD_TAG = "LITERT_THREAD"
         private const val DEFAULT_TEMPERATURE = 0.7
     }
 
@@ -35,112 +42,174 @@ class LiteRtLlmEngine(
         request: BenchmarkPrompt,
         callback: StreamCallback
     ) {
-        var engine: Engine? = null
-        var conversation: Conversation? = null
-        var firstTokenSeen = false
-
+        var session: Session? = null
         try {
-            val modelPath = prepareModelPath(request.modelFilePath)
-            if (!isSupportedModelFormat(modelPath)) {
-                callback.onError(
-                    IllegalArgumentException(
-                        "Selected LiteRT model format is not supported by current LiteRT runner."
-                    )
-                )
-                return
-            }
-
-            val engineConfig = EngineConfig(
-                modelPath = modelPath,
-                backend = Backend.CPU(),
-                visionBackend = null,
-                audioBackend = null,
-                // Keep defaults from LiteRT runtime for engine-level context sizing.
-                // Per-request behavior is controlled by sampler/conversation config.
-                maxNumTokens = null,
-                maxNumImages = null,
-                cacheDir = appContext.cacheDir.absolutePath
-            )
-            engine = Engine(engineConfig)
-            withContext(Dispatchers.IO) {
-                engine.initialize()
-            }
-
-            val samplerConfig = SamplerConfig(
-                topK = 40,
-                topP = 0.95,
-                temperature = DEFAULT_TEMPERATURE,
-                seed = 0
-            )
-            val conversationConfig = ConversationConfig(
-                systemInstruction = null,
-                initialMessages = emptyList(),
-                tools = emptyList(),
-                samplerConfig = samplerConfig,
-                automaticToolCalling = false,
-                channels = emptyList(),
-                extraContext = mapOf("max_output_tokens" to request.maxTokens)
-            )
-            conversation = engine.createConversation(conversationConfig)
-
-            suspendCancellableCoroutine { continuation ->
-                continuation.invokeOnCancellation {
-                    try {
-                        conversation.cancelProcess()
-                    } catch (_: Throwable) {
-                    }
-                }
-
-                conversation.sendMessageAsync(
-                    request.prompt,
-                    object : MessageCallback {
-                        override fun onMessage(message: Message) {
-                            val chunk = extractTextFromMessage(message)
-                            if (chunk.isBlank()) return
-                            if (!firstTokenSeen) {
-                                firstTokenSeen = true
-                                callback.onFirstToken()
-                            }
-                            callback.onToken(chunk)
-                        }
-
-                        override fun onDone() {
-                            callback.onComplete()
-                            if (continuation.isActive) {
-                                continuation.resume(Unit)
-                            }
-                        }
-
-                        override fun onError(throwable: Throwable) {
-                            callback.onError(
-                                RuntimeException(
-                                    throwable.message ?: "LiteRT generation error",
-                                    throwable
-                                )
-                            )
-                            if (continuation.isActive) {
-                                continuation.resume(Unit)
-                            }
-                        }
-                    },
-                    emptyMap()
-                )
-            }
+            session = openSession(request.modelFilePath)
+            session.generate(request, callback)
         } catch (cancelled: CancellationException) {
             callback.onError(CancellationException("Generation cancelled"))
         } catch (t: Throwable) {
             Log.e(TAG, "LiteRT generation failed", t)
             callback.onError(RuntimeException(classifyError(t), t))
         } finally {
-            try {
-                conversation?.close()
-            } catch (_: Throwable) {
+            session?.close()
+        }
+    }
+
+    suspend fun openSession(modelPathOrUri: String): Session {
+        val modelPath = prepareModelPath(modelPathOrUri)
+        if (!isSupportedModelFormat(modelPath)) {
+            throw IllegalArgumentException(
+                "Selected LiteRT model format is not supported by current LiteRT runner."
+            )
+        }
+
+        val initializeCount = AtomicInteger(0)
+        val startedAt = SystemClock.elapsedRealtime()
+        Log.d(PERF_TAG, "LITERT_PERF | Engine initialize started")
+        return try {
+            val engine = withContext(Dispatchers.Default) {
+                Log.d(THREAD_TAG, "LITERT_THREAD | Engine create | thread=${Thread.currentThread().name}")
+                var created: Engine? = null
+                try {
+                    created = Engine(
+                        EngineConfig(
+                            modelPath = modelPath,
+                            backend = Backend.CPU(),
+                            visionBackend = null,
+                            audioBackend = null,
+                            maxNumTokens = null,
+                            maxNumImages = null,
+                            cacheDir = appContext.cacheDir.absolutePath
+                        )
+                    )
+                    val count = initializeCount.incrementAndGet()
+                    Log.d(PERF_TAG, "LITERT_PERF | Engine.initialize() called | count=$count")
+                    Log.d(THREAD_TAG, "LITERT_THREAD | Engine initialize | thread=${Thread.currentThread().name}")
+                    created.initialize()
+                    created
+                } catch (error: Throwable) {
+                    try {
+                        created?.close()
+                    } catch (_: Throwable) {
+                    }
+                    throw error
+                }
             }
+            val elapsed = SystemClock.elapsedRealtime() - startedAt
+            Log.d(PERF_TAG, "LITERT_PERF | Engine initialize completed | ${elapsed.asSeconds()} saniye")
+            Session(engine, initializeCount)
+        } catch (error: Throwable) {
+            val elapsed = SystemClock.elapsedRealtime() - startedAt
+            Log.e(PERF_TAG, "LITERT_PERF | Engine initialize failed | ${elapsed.asSeconds()} saniye", error)
+            throw error
+        }
+    }
+
+    inner class Session internal constructor(
+        private val engine: Engine,
+        private val initializeCount: AtomicInteger
+    ) {
+        private val closed = AtomicBoolean(false)
+        private val conversationCount = AtomicInteger(0)
+
+        suspend fun generate(request: BenchmarkPrompt, callback: StreamCallback) {
+            check(!closed.get()) { "LiteRT session is already closed." }
+            var conversation: Conversation? = null
+            var firstTokenSeen = false
             try {
-                engine?.close()
-            } catch (_: Throwable) {
+                conversation = withContext(Dispatchers.Default) {
+                    val count = conversationCount.incrementAndGet()
+                    Log.d(
+                        THREAD_TAG,
+                        "LITERT_THREAD | Conversation create | count=$count | thread=${Thread.currentThread().name}"
+                    )
+                    engine.createConversation(conversationConfig(request.maxTokens))
+                }
+                val activeConversation = conversation
+
+                withContext(Dispatchers.Default) {
+                    suspendCancellableCoroutine { continuation ->
+                        continuation.invokeOnCancellation {
+                            try {
+                                activeConversation.cancelProcess()
+                            } catch (_: Throwable) {
+                            }
+                        }
+                        Log.d(
+                            THREAD_TAG,
+                            "LITERT_THREAD | sendMessageAsync | thread=${Thread.currentThread().name}"
+                        )
+                        activeConversation.sendMessageAsync(
+                            request.prompt,
+                            object : MessageCallback {
+                                override fun onMessage(message: Message) {
+                                    val chunk = extractTextFromMessage(message)
+                                    if (chunk.isBlank()) return
+                                    if (!firstTokenSeen) {
+                                        firstTokenSeen = true
+                                        callback.onFirstToken()
+                                    }
+                                    callback.onToken(chunk)
+                                }
+
+                                override fun onDone() {
+                                    callback.onComplete()
+                                    if (continuation.isActive) continuation.resume(Unit)
+                                }
+
+                                override fun onError(throwable: Throwable) {
+                                    callback.onError(
+                                        RuntimeException(
+                                            throwable.message ?: "LiteRT generation error",
+                                            throwable
+                                        )
+                                    )
+                                    if (continuation.isActive) continuation.resume(Unit)
+                                }
+                            },
+                            emptyMap()
+                        )
+                    }
+                }
+            } finally {
+                withContext(NonCancellable + Dispatchers.Default) {
+                    try {
+                        conversation?.close()
+                    } catch (_: Throwable) {
+                    }
+                }
             }
         }
+
+        suspend fun close() {
+            if (!closed.compareAndSet(false, true)) return
+            withContext(NonCancellable + Dispatchers.Default) {
+                try {
+                    engine.close()
+                } finally {
+                    Log.d(PERF_TAG, "LITERT_PERF | Engine initialize count = ${initializeCount.get()}")
+                }
+            }
+        }
+    }
+
+    private fun conversationConfig(maxTokens: Int): ConversationConfig {
+        val samplerConfig = SamplerConfig(
+            topK = 40,
+            topP = 0.95,
+            temperature = DEFAULT_TEMPERATURE,
+            seed = 0
+        )
+        return ConversationConfig(
+            systemInstruction = null,
+            initialMessages = emptyList(),
+            tools = emptyList(),
+            samplerConfig = samplerConfig,
+            automaticToolCalling = false,
+            channels = emptyList(),
+            extraContext = mapOf("max_output_tokens" to maxTokens)
+        )
     }
 
     private suspend fun prepareModelPath(modelPathOrUri: String): String = withContext(Dispatchers.IO) {
@@ -222,4 +291,7 @@ class LiteRtLlmEngine(
             .filterIsInstance<Content.Text>()
             .joinToString(separator = "") { it.text }
     }
+
+    private fun Long.asSeconds(): String = String.format(Locale.ROOT, "%.3f", this / 1000.0)
+
 }
