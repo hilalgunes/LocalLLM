@@ -55,6 +55,20 @@ class BenchmarkViewModel : ViewModel() {
     private var modelRunFileMapper: ModelRunFileMapper? = null
     private var activeDownloadJob: Job? = null
     private val featureGenerationMutex = Mutex()
+    private var cachedFeatureSession: LiteRtLlmEngine.Session? = null
+    private var cachedFeatureSelection: BenchmarkModelSelection? = null
+
+    override fun onCleared() {
+        super.onCleared()
+        // Finish any active lease before releasing native model memory.
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            featureGenerationMutex.withLock {
+                cachedFeatureSession?.close()
+                cachedFeatureSession = null
+                cachedFeatureSelection = null
+            }
+        }
+    }
     private val _uiState = MutableStateFlow(BenchmarkUiState())
     val uiState: StateFlow<BenchmarkUiState> = _uiState.asStateFlow()
 
@@ -535,15 +549,25 @@ class BenchmarkViewModel : ViewModel() {
         validateCatalogSelectionForRun(selection)?.let { throw IllegalStateException(it) }
         featureGenerationMutex.lock()
         try {
+            if (cachedFeatureSelection != selection) {
+                cachedFeatureSession?.close()
+                cachedFeatureSession = null
+                cachedFeatureSelection = null
+            }
             val reusableLiteRtSession = if (selection.runtimeType == RuntimeType.LITERT) {
-                (liteRtEngine as? LiteRtLlmEngine)?.openSession(selection.modelPath)
-                    ?: throw IllegalStateException("LiteRT engine is not initialized.")
+                cachedFeatureSession?.also {
+                    Log.d("TEST_FLOW", "TEST_FLOW | Model session reused | ${selection.displayName}")
+                } ?: ((liteRtEngine as? LiteRtLlmEngine)?.openSession(selection.modelPath)
+                    ?: throw IllegalStateException("LiteRT engine is not initialized.")).also {
+                    cachedFeatureSession = it
+                    cachedFeatureSelection = selection
+                }
             } else {
                 null
             }
             val closed = AtomicBoolean(false)
             return object : FeatureGenerationSession {
-                override suspend fun generate(prompt: String, maxTokens: Int): String {
+                override suspend fun generate(prompt: String, maxTokens: Int, onText: (String) -> Unit): String {
                     check(!closed.get()) { "Feature generation session is already closed." }
                     val generateRequest: suspend (BenchmarkPrompt, StreamCallback) -> Unit =
                         reusableLiteRtSession?.let { session -> session::generate }
@@ -552,17 +576,15 @@ class BenchmarkViewModel : ViewModel() {
                         selection = selection,
                         prompt = prompt,
                         maxTokens = maxTokens,
-                        generateRequest = generateRequest
+                        generateRequest = generateRequest,
+                        onText = onText
                     )
                 }
 
                 override suspend fun close() {
                     if (!closed.compareAndSet(false, true)) return
-                    try {
-                        reusableLiteRtSession?.close()
-                    } finally {
-                        featureGenerationMutex.unlock()
-                    }
+                    // Release the request lease; keep the model warm for the next question.
+                    featureGenerationMutex.unlock()
                 }
             }
         } catch (error: Throwable) {
@@ -575,9 +597,12 @@ class BenchmarkViewModel : ViewModel() {
         selection: BenchmarkModelSelection,
         prompt: String,
         maxTokens: Int,
-        generateRequest: suspend (BenchmarkPrompt, StreamCallback) -> Unit
+        generateRequest: suspend (BenchmarkPrompt, StreamCallback) -> Unit,
+        onText: (String) -> Unit = {}
     ): String {
         val output = StringBuffer()
+        val startedAt = android.os.SystemClock.elapsedRealtime()
+        Log.d("TEST_FLOW", "TEST_FLOW | Generation started | model=${selection.displayName} | runtime=${selection.runtimeType} | promptChars=${prompt.length} | maxTokens=$maxTokens")
         var generationError: Throwable? = null
         val request = BenchmarkPrompt(
                 modelId = selection.modelId,
@@ -593,10 +618,13 @@ class BenchmarkViewModel : ViewModel() {
                 maxTokens = maxTokens.coerceIn(MIN_MAX_TOKENS, MAX_MAX_TOKENS)
             )
         val callback = object : StreamCallback {
-                override fun onFirstToken() = Unit
+                override fun onFirstToken() {
+                    Log.d("TEST_FLOW", "TEST_FLOW | First text | elapsedMs=${android.os.SystemClock.elapsedRealtime() - startedAt}")
+                }
 
                 override fun onToken(token: String) {
                     output.append(token)
+                    onText(output.toString())
                 }
 
                 override fun onComplete() = Unit

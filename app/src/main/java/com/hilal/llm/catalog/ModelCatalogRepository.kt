@@ -263,6 +263,29 @@ object ModelCatalogRepository {
             disabledReason = null
         ),
         ModelConfig(
+            id = "lfm2-5-2-6b-litert-lm",
+            displayName = "LFM2.5 2.6B INT4 LiteRT-LM",
+            description = "Liquid AI LFM2.5-2.6B text generation bundle for LiteRT-LM (0.14+), with an embedded tokenizer and chat template.",
+            runtimeType = RuntimeType.LITERT,
+            engineType = EngineType.LITERT_LM,
+            promptTemplateType = PromptTemplateType.GENERIC,
+            files = listOf(
+                ModelFileConfig(
+                    type = ModelFileType.LITERT_TASK,
+                    fileName = "LFM2.5-2.6B_int4.litertlm",
+                    url = "https://huggingface.co/litert-community/LFM2.5-2.6B/resolve/main/LFM2.5-2.6B_int4.litertlm",
+                    required = true,
+                    description = "Primary LFM2.5-2.6B INT4 LiteRT-LM bundle.",
+                    minBytes = 1_600_000_000L
+                )
+            ),
+            estimatedSize = "~1.67 GB",
+            quantization = "INT4 blockwise-32 / INT8 embedding",
+            isEnabled = true,
+            disabledReason = null,
+            family = "LFM2.5"
+        ),
+        ModelConfig(
             id = "qwen3-0.6b-litert",
             displayName = "Qwen3 0.6B LiteRT-LM",
             description = "LiteRT-LM Qwen3 export with mixed INT4 weights and float KV cache.",

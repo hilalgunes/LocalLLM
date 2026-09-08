@@ -145,7 +145,7 @@ class LiteRtLlmEngine(
                             object : MessageCallback {
                                 override fun onMessage(message: Message) {
                                     val chunk = extractTextFromMessage(message)
-                                    if (chunk.isBlank()) return
+                                    if (chunk.isEmpty()) return
                                     if (!firstTokenSeen) {
                                         firstTokenSeen = true
                                         callback.onFirstToken()

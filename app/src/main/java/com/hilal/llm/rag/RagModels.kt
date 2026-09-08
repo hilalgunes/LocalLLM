@@ -24,6 +24,7 @@ enum class RagVectorStoreBackend(val displayName: String, val description: Strin
 }
 
 val ragGenerationModelIds = setOf(
+    "lfm2-5-2-6b-litert-lm",
     "qwen3-0.6b-litert",
     "qwen3-0.6b-executorch-xnnpack",
     "gemma3-1b-executorch-xnnpack",

@@ -129,7 +129,9 @@ class TestViewModel(
                             val classificationPrompt = buildClassificationPrompt(question)
                             Log.d(TAG, "TEST_FLOW | [LLM #1] Prompt gönderildi | Classification")
                             logFlowText("[LLM #1] Prompt", classificationPrompt)
+                            val sessionStartedAt = SystemClock.elapsedRealtime()
                             val session = openSession(selection).also { flowSession = it }
+                            Log.d(TAG, "TEST_FLOW | Model ready | model=${selection.displayName} | runtime=${selection.runtimeType} | elapsedMs=${SystemClock.elapsedRealtime() - sessionStartedAt}")
                             val raw = session.generate(classificationPrompt, CLASSIFICATION_MAX_TOKENS)
                             val normalized = normalizeClassificationOutput(raw)
                             val elapsed = SystemClock.elapsedRealtime() - startedAt
@@ -225,7 +227,9 @@ class TestViewModel(
                     if (isLiteRt) Log.d(PERF_TAG, "LITERT_PERF | Final generation started")
                     val answer = try {
                         checkNotNull(flowSession) { "Feature generation session is not initialized." }
-                            .generate(finalPrompt, ANSWER_MAX_TOKENS)
+                            .generate(finalPrompt, ANSWER_MAX_TOKENS) { partialAnswer ->
+                                updateIfCurrent(requestId) { it.copy(answer = partialAnswer) }
+                            }
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (error: Throwable) {
