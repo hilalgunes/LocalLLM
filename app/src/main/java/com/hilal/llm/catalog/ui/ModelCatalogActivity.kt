@@ -155,6 +155,7 @@ private fun ModelCatalogCard(
     val runtimeLabel = when (model.runtimeType) {
         RuntimeType.EXECUTORCH -> "ExecuTorch"
         RuntimeType.LITERT -> "LiteRT"
+        RuntimeType.ONNX -> "ONNX"
         RuntimeType.LLAMA_CPP -> "llama.cpp"
     }
     val requiredFilesHaveUrls = model.files
@@ -289,7 +290,7 @@ private fun DownloadStateRow(
         is DownloadState.Downloading -> {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "Downloading ${downloadState.fileName} • ${downloadState.progress}%",
+                    text = "${downloadState.progressLabel}\n${downloadState.fileName}",
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFF374151)
                 )
@@ -318,6 +319,7 @@ private fun DownloadStateRow(
 
 private fun fileFormatLabel(model: ModelConfig): String {
     return when (model.engineType) {
+        EngineType.ONNX_GENAI -> "ONNX + GenAI config + Tokenizer"
         EngineType.EXECUTORCH_GENERATE -> "PTE + Tokenizer"
         EngineType.EXECUTORCH_FORWARD -> "PTE Forward-only"
         EngineType.LITERT_LM -> "LiteRT Bundle / Task / TFLite"

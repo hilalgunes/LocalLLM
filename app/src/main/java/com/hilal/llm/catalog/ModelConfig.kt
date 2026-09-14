@@ -28,6 +28,7 @@ data class ModelConfig(
         get() = when (runtimeType) {
             RuntimeType.EXECUTORCH -> "PTE"
             RuntimeType.LITERT -> "LiteRT"
+            RuntimeType.ONNX -> "ONNX GenAI"
             RuntimeType.LLAMA_CPP -> "GGUF"
         }
 

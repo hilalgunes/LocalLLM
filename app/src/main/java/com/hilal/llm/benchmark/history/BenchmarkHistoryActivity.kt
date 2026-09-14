@@ -282,14 +282,16 @@ private fun FilterSection(
                     null -> 0
                     RuntimeType.EXECUTORCH -> 1
                     RuntimeType.LITERT -> 2
+                    RuntimeType.ONNX -> 4
                     RuntimeType.LLAMA_CPP -> 3
                 },
-                chips = listOf("All", "ExecuTorch", "LiteRT", "llama.cpp"),
+                chips = listOf("All", "ExecuTorch", "LiteRT", "llama.cpp", "ONNX"),
                 onSelected = { index ->
                     onRuntimeFilterSelected(
                         when (index) {
                             1 -> RuntimeType.EXECUTORCH
                             2 -> RuntimeType.LITERT
+                            4 -> RuntimeType.ONNX
                             3 -> RuntimeType.LLAMA_CPP
                             else -> null
                         }
@@ -499,6 +501,7 @@ private fun RuntimeBadge(result: BenchmarkResult) {
         result.selectionSource == SelectionSource.MANUAL -> "Manual"
         runtimeType == RuntimeType.EXECUTORCH -> "ExecuTorch"
         runtimeType == RuntimeType.LITERT -> "LiteRT"
+        runtimeType == RuntimeType.ONNX -> "ONNX"
         runtimeType == RuntimeType.LLAMA_CPP -> "llama.cpp"
         else -> "Unknown"
     }

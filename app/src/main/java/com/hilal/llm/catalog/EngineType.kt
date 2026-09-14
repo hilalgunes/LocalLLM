@@ -4,5 +4,6 @@ enum class EngineType {
     EXECUTORCH_GENERATE,
     EXECUTORCH_FORWARD,
     LITERT_LM,
-    LLAMA_CPP
+    LLAMA_CPP,
+    ONNX_GENAI
 }

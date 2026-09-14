@@ -7,8 +7,13 @@ sealed class DownloadState {
         val fileName: String,
         val progress: Int,
         val downloadedBytes: Long,
-        val totalBytes: Long?
-    ) : DownloadState()
+        val totalBytes: Long?,
+        val fileIndex: Int = 1,
+        val fileCount: Int = 1
+    ) : DownloadState() {
+        val progressLabel: String
+            get() = "Dosya $fileIndex/$fileCount • %$progress"
+    }
 
     data object Success : DownloadState()
 

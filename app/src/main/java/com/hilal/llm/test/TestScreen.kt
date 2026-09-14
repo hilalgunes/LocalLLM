@@ -2,14 +2,15 @@ package com.hilal.llm.test
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -24,12 +25,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.hilal.llm.benchmark.BenchmarkUiState
 import com.hilal.llm.benchmark.EngineType
-import com.hilal.llm.benchmark.displayLabel
 import com.hilal.llm.benchmark.productionEngineTypes
 import com.hilal.llm.catalog.ModelConfig
 import com.hilal.llm.catalog.RuntimeType
@@ -47,7 +46,6 @@ fun TestScreen(
     onSubmit: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var modelPickerVisible by rememberSaveable { mutableStateOf(false) }
     var detailsExpanded by rememberSaveable { mutableStateOf(false) }
     val selectedModel = benchmarkState.selectedCatalogModel
 
@@ -64,28 +62,14 @@ fun TestScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text("Local model", style = MaterialTheme.typography.titleMedium)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        productionEngineTypes.forEach { engine ->
-                            val selected = benchmarkState.selectedEngineType == engine
-                            if (selected) {
-                                Button(onClick = { onRuntimeSelected(engine) }, modifier = Modifier.weight(1f)) {
-                                    Text(engine.label)
-                                }
-                            } else {
-                                OutlinedButton(onClick = { onRuntimeSelected(engine) }, modifier = Modifier.weight(1f)) {
-                                    Text(engine.label)
-                                }
-                            }
-                        }
-                    }
-                    Text("Runtime: ${benchmarkState.selectedEngineType.label}")
-                    Text("Model: ${selectedModel?.displayName ?: "Seçilmedi"}")
-                    Button(onClick = { modelPickerVisible = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Model seç")
-                    }
+                    TestRuntimeDropdown(
+                        selectedEngine = benchmarkState.selectedEngineType,
+                        onRuntimeSelected = onRuntimeSelected
+                    )
+                    TestModelDropdown(
+                        benchmarkState = benchmarkState,
+                        onModelSelected = onModelSelected
+                    )
                     benchmarkState.activeDownloadModelId?.let { modelId ->
                         val model = benchmarkState.availableModels.firstOrNull { it.id == modelId }
                         val state = benchmarkState.modelDownloadStates[modelId]
@@ -157,16 +141,6 @@ fun TestScreen(
         }
     }
 
-    if (modelPickerVisible) {
-        TestModelPicker(
-            benchmarkState = benchmarkState,
-            onDismiss = { modelPickerVisible = false },
-            onModelSelected = { modelId ->
-                modelPickerVisible = false
-                onModelSelected(modelId)
-            }
-        )
-    }
 }
 
 @Composable
@@ -199,46 +173,103 @@ private fun TestDetails(state: TestUiState) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TestModelPicker(
+private fun TestRuntimeDropdown(
+    selectedEngine: EngineType,
+    onRuntimeSelected: (EngineType) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it }
+    ) {
+        OutlinedTextField(
+            value = selectedEngine.label,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Runtime") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier.menuAnchor().fillMaxWidth()
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            productionEngineTypes.forEach { engine ->
+                DropdownMenuItem(
+                    text = { Text(engine.label) },
+                    onClick = {
+                        expanded = false
+                        onRuntimeSelected(engine)
+                    }
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TestModelDropdown(
     benchmarkState: BenchmarkUiState,
-    onDismiss: () -> Unit,
     onModelSelected: (String) -> Unit
 ) {
     val runtime = runtimeFor(benchmarkState.selectedEngineType)
+    var expanded by remember(runtime) { mutableStateOf(false) }
     val models = remember(benchmarkState.availableModels, runtime) {
         benchmarkState.availableModels.filter { it.runtimeType == runtime }
     }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Model seç") },
-        text = {
-            LazyColumn(modifier = Modifier.heightIn(max = 480.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (models.isEmpty()) item { Text("Bu runtime için model bulunamadı.") }
-                items(models, key = ModelConfig::id) { model ->
-                    val downloadState = benchmarkState.modelDownloadStates[model.id] ?: DownloadState.Idle
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it }
+    ) {
+        OutlinedTextField(
+            value = benchmarkState.selectedCatalogModel?.displayName ?: "Model seç",
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Local model") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier.menuAnchor().fillMaxWidth()
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.heightIn(max = 400.dp)
+        ) {
+            if (models.isEmpty()) {
+                DropdownMenuItem(
+                    text = { Text("Bu runtime için model bulunamadı.") },
+                    onClick = {},
+                    enabled = false
+                )
+            }
+            models.forEach { model ->
+                val state = benchmarkState.modelDownloadStates[model.id] ?: DownloadState.Idle
+                DropdownMenuItem(
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(model.displayName, style = MaterialTheme.typography.titleSmall)
-                            Text("${model.quantization ?: "-"} • ${model.estimatedSize}")
-                            Text(modelStatus(model, downloadState))
-                            Button(
-                                onClick = { onModelSelected(model.id) },
-                                enabled = model.isEnabled && model.hasDownloadArtifacts && downloadState !is DownloadState.Downloading,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(if (downloadState is DownloadState.Success) "Kullan" else "İndir ve kullan")
+                            Text("${model.quantization ?: "-"} • ${model.estimatedSize}", style = MaterialTheme.typography.bodySmall)
+                            Text(modelStatus(model, state), style = MaterialTheme.typography.bodySmall)
+                            if (model.isEnabled && model.hasDownloadArtifacts && state !is DownloadState.Downloading) {
+                                Text(if (state is DownloadState.Success) "Kullan" else "İndir ve kullan", style = MaterialTheme.typography.labelSmall)
                             }
                         }
-                    }
-                }
+                    },
+                    onClick = {
+                        expanded = false
+                        onModelSelected(model.id)
+                    },
+                    enabled = model.isEnabled && model.hasDownloadArtifacts && state !is DownloadState.Downloading
+                )
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Kapat") } }
-    )
+        }
+    }
 }
 
 private fun runtimeFor(engineType: EngineType): RuntimeType? = when (engineType) {
+    EngineType.ONNX -> RuntimeType.ONNX
     EngineType.LLAMA_CPP -> RuntimeType.LLAMA_CPP
     EngineType.LITERT -> RuntimeType.LITERT
     EngineType.EXECUTORCH -> RuntimeType.EXECUTORCH
@@ -248,13 +279,13 @@ private fun runtimeFor(engineType: EngineType): RuntimeType? = when (engineType)
 private fun modelStatus(model: ModelConfig, state: DownloadState): String = when {
     !model.isEnabled -> model.disabledReason ?: "Kullanılamıyor"
     state is DownloadState.Success -> "İndirildi"
-    state is DownloadState.Downloading -> "İndiriliyor: ${state.progress}%"
+    state is DownloadState.Downloading -> "${state.progressLabel} • ${state.fileName}"
     state is DownloadState.Failed -> "İndirme başarısız: ${state.message}"
     else -> "İndirilmedi"
 }
 
 private fun downloadProgress(state: DownloadState?): String =
-    (state as? DownloadState.Downloading)?.let { " • ${it.progress}%" }.orEmpty()
+    (state as? DownloadState.Downloading)?.let { "\n${it.progressLabel}\n${it.fileName}" }.orEmpty()
 
 private fun retrievalLabel(status: RetrievalStatus): String = when (status) {
     RetrievalStatus.Idle -> "Bekliyor"

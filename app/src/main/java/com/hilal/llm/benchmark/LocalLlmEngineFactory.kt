@@ -7,6 +7,7 @@ class LocalLlmEngineFactory(
     private val execuTorchEngine: LocalLlmEngine?,
     private val liteRtEngine: LocalLlmEngine?,
     private val llamaCppEngine: LocalLlmEngine?,
+    private val onnxEngine: LocalLlmEngine? = null,
     private val manualFallbackEngine: LocalLlmEngine
 ) {
     fun create(
@@ -22,6 +23,7 @@ class LocalLlmEngineFactory(
                 liteRtEngine?.let { LiteRtLocalLlmEngineAdapter(it) }
                     ?: UnsupportedRuntimeEngine("LiteRT catalog execution is not connected yet.")
 
+            CatalogEngineType.ONNX_GENAI -> onnxEngine ?: UnsupportedRuntimeEngine("ONNX engine is not initialized.")
             CatalogEngineType.LLAMA_CPP ->
                 llamaCppEngine?.let { LlamaCppLocalLlmEngineAdapter(it) }
                     ?: manualFallbackEngine
@@ -34,6 +36,7 @@ class LocalLlmEngineFactory(
         return when (runtimeType) {
             RuntimeType.EXECUTORCH -> execuTorchEngine ?: manualFallbackEngine
             RuntimeType.LITERT -> liteRtEngine ?: manualFallbackEngine
+            RuntimeType.ONNX -> onnxEngine ?: UnsupportedRuntimeEngine("ONNX engine is not initialized.")
             RuntimeType.LLAMA_CPP -> llamaCppEngine ?: manualFallbackEngine
             null -> manualFallbackEngine
         }

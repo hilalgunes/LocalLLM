@@ -70,6 +70,8 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.llamacpp.kotlin)
     implementation(libs.litertlm.android)
+    implementation(files("libs/onnxruntime-genai-android-0.15.2.aar"))
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.28.0")
     implementation(libs.executorch.android)
     implementation(libs.pdfbox.android)
     implementation(libs.androidx.room.runtime)

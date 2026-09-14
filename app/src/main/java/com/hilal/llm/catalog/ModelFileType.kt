@@ -9,5 +9,6 @@ enum class ModelFileType {
     LITERT_BUNDLE,
     LLAMA_GGUF,
     CONFIG_JSON,
-    OTHER
+    OTHER,
+    ONNX_CONFIG
 }

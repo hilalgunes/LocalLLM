@@ -547,6 +547,7 @@ private fun RuntimeModelPickerDialog(
     onSelectModel: (String) -> Unit
 ) {
     val runtime = when (uiState.selectedEngineType) {
+        EngineType.ONNX -> RuntimeType.ONNX
         EngineType.LLAMA_CPP -> RuntimeType.LLAMA_CPP
         EngineType.LITERT -> RuntimeType.LITERT
         EngineType.EXECUTORCH -> RuntimeType.EXECUTORCH
@@ -571,7 +572,7 @@ private fun RuntimeModelPickerDialog(
                         !model.isEnabled -> "Unavailable"
                         !model.hasDownloadArtifacts -> "Download unavailable"
                         state is DownloadState.Success -> "Downloaded"
-                        state is DownloadState.Downloading -> "Downloading ${state.progress}%"
+                        state is DownloadState.Downloading -> "${state.progressLabel} • ${state.fileName}"
                         state is DownloadState.Failed -> "Download failed"
                         else -> "Not downloaded"
                     }
@@ -626,7 +627,7 @@ private fun ModelDownloadDialog(
                         "${formatBytes(downloading.downloadedBytes)} / " +
                             (downloading.totalBytes?.let(::formatBytes) ?: "Unknown size")
                     )
-                    Text("${downloading.progress}%")
+                    Text(downloading.progressLabel)
                     if (downloading.totalBytes != null) {
                         LinearProgressIndicator(
                             progress = { downloading.progress / 100f },
@@ -665,6 +666,7 @@ private fun SelectedModelSummary(uiState: BenchmarkUiState) {
     val selectedModel = uiState.selectedModel
     val runtimeLabel = when {
         selectedCatalogModel != null -> selectedCatalogModel.runtimeType.displayName()
+        uiState.selectedEngineType == EngineType.ONNX -> "ONNX"
         uiState.selectedEngineType == EngineType.EXECUTORCH -> "ExecuTorch"
         uiState.selectedEngineType == EngineType.LITERT -> "LiteRT"
         uiState.selectedEngineType == EngineType.LLAMA_CPP -> "llama.cpp"
@@ -690,6 +692,7 @@ private fun RuntimeType.displayName(): String {
     return when (this) {
         RuntimeType.EXECUTORCH -> "ExecuTorch"
         RuntimeType.LITERT -> "LiteRT"
+        RuntimeType.ONNX -> "ONNX"
         RuntimeType.LLAMA_CPP -> "llama.cpp"
     }
 }

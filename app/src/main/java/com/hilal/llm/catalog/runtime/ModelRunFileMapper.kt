@@ -40,6 +40,7 @@ class ModelRunFileMapper(
                 ModelFileType.LITERT_BUNDLE
             )
 
+            EngineType.ONNX_GENAI -> listOf(ModelFileType.ONNX_CONFIG)
             EngineType.LLAMA_CPP -> listOf(ModelFileType.LLAMA_GGUF)
         }
 
@@ -90,6 +91,7 @@ class ModelRunFileMapper(
                 tokenizer
             }
 
+            EngineType.ONNX_GENAI,
             EngineType.LITERT_LM,
             EngineType.LLAMA_CPP -> null
         }

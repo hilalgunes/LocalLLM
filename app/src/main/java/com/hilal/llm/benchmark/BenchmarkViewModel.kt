@@ -37,6 +37,7 @@ class BenchmarkViewModel : ViewModel() {
         private const val TAG = "BenchmarkViewModel"
     }
 
+    private val onnxEngine = OnnxLlmEngine()
     private val fakeEngine: LocalLlmEngine = FakeLlmEngine()
     private var llamaEngine: LocalLlmEngine? = null
     private var liteRtEngine: LocalLlmEngine? = null
@@ -47,6 +48,7 @@ class BenchmarkViewModel : ViewModel() {
             execuTorchEngine = execuTorchEngine,
             liteRtEngine = liteRtEngine,
             llamaCppEngine = llamaEngine,
+            onnxEngine = onnxEngine,
             manualFallbackEngine = selectedEngine
         )
     private val presetRepository = BenchmarkPresetRepository()
@@ -63,6 +65,7 @@ class BenchmarkViewModel : ViewModel() {
         // Finish any active lease before releasing native model memory.
         kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
             featureGenerationMutex.withLock {
+                onnxEngine.release()
                 cachedFeatureSession?.close()
                 cachedFeatureSession = null
                 cachedFeatureSelection = null
@@ -140,6 +143,7 @@ class BenchmarkViewModel : ViewModel() {
             activeDownloadJob?.cancel()
         }
         selectedEngine = when (engineType) {
+            EngineType.ONNX -> onnxEngine
             EngineType.FAKE -> fakeEngine
             EngineType.LLAMA_CPP -> llamaEngine ?: fakeEngine
             EngineType.LITERT -> liteRtEngine ?: fakeEngine
@@ -293,6 +297,7 @@ class BenchmarkViewModel : ViewModel() {
     }
 
     private fun runtimeFor(engineType: EngineType): RuntimeType? = when (engineType) {
+        EngineType.ONNX -> RuntimeType.ONNX
         EngineType.LLAMA_CPP -> RuntimeType.LLAMA_CPP
         EngineType.LITERT -> RuntimeType.LITERT
         EngineType.EXECUTORCH -> RuntimeType.EXECUTORCH
@@ -550,9 +555,10 @@ class BenchmarkViewModel : ViewModel() {
         featureGenerationMutex.lock()
         try {
             if (cachedFeatureSelection != selection) {
+                onnxEngine.release()
                 cachedFeatureSession?.close()
                 cachedFeatureSession = null
-                cachedFeatureSelection = null
+                cachedFeatureSelection = selection
             }
             val reusableLiteRtSession = if (selection.runtimeType == RuntimeType.LITERT) {
                 cachedFeatureSession?.also {
@@ -674,6 +680,7 @@ class BenchmarkViewModel : ViewModel() {
         return when (runtimeType) {
             RuntimeType.EXECUTORCH -> EngineType.EXECUTORCH
             RuntimeType.LITERT -> EngineType.LITERT
+            RuntimeType.ONNX -> EngineType.ONNX
             RuntimeType.LLAMA_CPP -> EngineType.LLAMA_CPP
         }
     }
@@ -713,6 +720,10 @@ class BenchmarkViewModel : ViewModel() {
                 if (supported) null else "Selected LiteRT model format is not supported by current LiteRT runner."
             }
 
+            com.hilal.llm.catalog.EngineType.ONNX_GENAI -> {
+                if (selection.modelPath.endsWith("genai_config.json")) null
+                else "ONNX requires a complete GenAI model package from the catalog."
+            }
             com.hilal.llm.catalog.EngineType.LLAMA_CPP -> {
                 if (selection.modelPath.trim().endsWith(".gguf", ignoreCase = true)) {
                     null
@@ -728,6 +739,7 @@ class BenchmarkViewModel : ViewModel() {
             execuTorchEngine = execuTorchEngine,
             liteRtEngine = liteRtEngine,
             llamaCppEngine = llamaEngine,
+            onnxEngine = onnxEngine,
             manualFallbackEngine = selectedEngine
         )
     }

@@ -722,6 +722,7 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
                 LlamaCppRagEmbeddingProvider(resolver)
             }
             RuntimeType.LITERT -> LiteRtGeckoRagEmbeddingProvider()
+            RuntimeType.ONNX -> throw IllegalStateException("ONNX embedding provider is not configured.")
             RuntimeType.EXECUTORCH -> throw IllegalStateException(
                 "${embeddingModel.displayName} için ExecuTorch embedding provider bağlı değil."
             )

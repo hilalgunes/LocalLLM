@@ -646,7 +646,7 @@ private fun downloadDialogContent(
                         modifier = Modifier.fillMaxWidth()
                     )
                     Text(
-                        text = "İndiriliyor: %${pendingDownloadState.progress}",
+                        text = "${pendingDownloadState.progressLabel}\n${pendingDownloadState.fileName}",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFF6B7280)
                     )
@@ -665,7 +665,7 @@ private fun modelMenuSubtitle(
         !model.isEnabled -> model.disabledReason ?: "Disabled"
         downloadState is DownloadState.Success && isSelected -> "Downloaded - selected"
         downloadState is DownloadState.Success -> "Downloaded"
-        downloadState is DownloadState.Downloading -> "Downloading ${downloadState.progress}%"
+        downloadState is DownloadState.Downloading -> "${downloadState.progressLabel} • ${downloadState.fileName}"
         isSelected -> "Selected"
         else -> "Not downloaded"
     }

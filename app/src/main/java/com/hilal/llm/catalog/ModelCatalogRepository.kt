@@ -3,6 +3,34 @@ package com.hilal.llm.catalog
 object ModelCatalogRepository {
     private val availableModels: List<ModelConfig> = listOf(
         ModelConfig(
+            id = "gemma4-e2b-onnx-q4km",
+            displayName = "Gemma 4 E2B ONNX Q4_K_M (Experimental)",
+            description = "CPU comparison. Mixed precision package: decoder quantized, large embeddings. About 8 GB download; device memory suitability must be tested.",
+            runtimeType = RuntimeType.ONNX,
+            engineType = EngineType.ONNX_GENAI,
+            promptTemplateType = PromptTemplateType.GEMMA,
+            files = listOf(
+                ModelFileConfig(ModelFileType.OTHER, "audio_encoder/model.onnx", "https://huggingface.co/justinchuby/gemma-4-e2b-it-onnx/resolve/9bcf2cb1c2878b1c68a5f94db037272dfb278384/Q4_K_M/default/audio_encoder/model.onnx", true, minBytes = 1210579L),
+                ModelFileConfig(ModelFileType.OTHER, "audio_encoder/model.onnx.data", "https://huggingface.co/justinchuby/gemma-4-e2b-it-onnx/resolve/9bcf2cb1c2878b1c68a5f94db037272dfb278384/Q4_K_M/default/audio_encoder/model.onnx.data", true, minBytes = 614727680L),
+                ModelFileConfig(ModelFileType.OTHER, "audio_feature_extraction.json", "https://huggingface.co/justinchuby/gemma-4-e2b-it-onnx/resolve/9bcf2cb1c2878b1c68a5f94db037272dfb278384/Q4_K_M/default/audio_feature_extraction.json", true, minBytes = 923L),
+                ModelFileConfig(ModelFileType.OTHER, "chat_template.jinja", "https://huggingface.co/justinchuby/gemma-4-e2b-it-onnx/resolve/9bcf2cb1c2878b1c68a5f94db037272dfb278384/Q4_K_M/default/chat_template.jinja", true, minBytes = 17336L),
+                ModelFileConfig(ModelFileType.OTHER, "decoder/model.onnx", "https://huggingface.co/justinchuby/gemma-4-e2b-it-onnx/resolve/9bcf2cb1c2878b1c68a5f94db037272dfb278384/Q4_K_M/default/decoder/model.onnx", true, minBytes = 868658L),
+                ModelFileConfig(ModelFileType.OTHER, "decoder/model.onnx.data", "https://huggingface.co/justinchuby/gemma-4-e2b-it-onnx/resolve/9bcf2cb1c2878b1c68a5f94db037272dfb278384/Q4_K_M/default/decoder/model.onnx.data", true, minBytes = 1511784448L),
+                ModelFileConfig(ModelFileType.OTHER, "embedding/model.onnx", "https://huggingface.co/justinchuby/gemma-4-e2b-it-onnx/resolve/9bcf2cb1c2878b1c68a5f94db037272dfb278384/Q4_K_M/default/embedding/model.onnx", true, minBytes = 15021L),
+                ModelFileConfig(ModelFileType.OTHER, "embedding/model.onnx.data", "https://huggingface.co/justinchuby/gemma-4-e2b-it-onnx/resolve/9bcf2cb1c2878b1c68a5f94db037272dfb278384/Q4_K_M/default/embedding/model.onnx.data", true, minBytes = 5530517504L),
+                ModelFileConfig(ModelFileType.ONNX_CONFIG, "genai_config.json", "https://huggingface.co/justinchuby/gemma-4-e2b-it-onnx/resolve/9bcf2cb1c2878b1c68a5f94db037272dfb278384/Q4_K_M/default/genai_config.json", true, minBytes = 3229L),
+                ModelFileConfig(ModelFileType.OTHER, "image_processor.json", "https://huggingface.co/justinchuby/gemma-4-e2b-it-onnx/resolve/9bcf2cb1c2878b1c68a5f94db037272dfb278384/Q4_K_M/default/image_processor.json", true, minBytes = 744L),
+                ModelFileConfig(ModelFileType.TOKENIZER_JSON, "tokenizer.json", "https://huggingface.co/justinchuby/gemma-4-e2b-it-onnx/resolve/9bcf2cb1c2878b1c68a5f94db037272dfb278384/Q4_K_M/default/tokenizer.json", true, minBytes = 32169626L),
+                ModelFileConfig(ModelFileType.OTHER, "tokenizer_config.json", "https://huggingface.co/justinchuby/gemma-4-e2b-it-onnx/resolve/9bcf2cb1c2878b1c68a5f94db037272dfb278384/Q4_K_M/default/tokenizer_config.json", true, minBytes = 19842L),
+                ModelFileConfig(ModelFileType.OTHER, "vision_encoder/model.onnx", "https://huggingface.co/justinchuby/gemma-4-e2b-it-onnx/resolve/9bcf2cb1c2878b1c68a5f94db037272dfb278384/Q4_K_M/default/vision_encoder/model.onnx", true, minBytes = 1185988L),
+                ModelFileConfig(ModelFileType.OTHER, "vision_encoder/model.onnx.data", "https://huggingface.co/justinchuby/gemma-4-e2b-it-onnx/resolve/9bcf2cb1c2878b1c68a5f94db037272dfb278384/Q4_K_M/default/vision_encoder/model.onnx.data", true, minBytes = 358088704L)
+            ),
+            estimatedSize = "~8.05 GB",
+            quantization = "Q4_K_M (mixed precision)",
+            isEnabled = true,
+            disabledReason = null
+        ),
+        ModelConfig(
             id = "qwen3-0.6b-executorch-xnnpack",
             displayName = "Qwen3 0.6B INT8/INT4 ExecuTorch XNNPACK",
             description = "ExecuTorch generate model with a Qwen prompt template on XNNPACK.",
