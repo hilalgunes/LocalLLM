@@ -75,7 +75,7 @@ class LiteRtLlmEngine(
                     created = Engine(
                         EngineConfig(
                             modelPath = modelPath,
-                            backend = Backend.CPU(),
+                            backend = Backend.GPU(),
                             visionBackend = null,
                             audioBackend = null,
                             maxNumTokens = null,

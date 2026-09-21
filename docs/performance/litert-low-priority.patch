@@ -1,0 +1,17 @@
+--- a/kotlin/java/com/google/ai/edge/litertlm/jni/litertlm.cc
++++ b/kotlin/java/com/google/ai/edge/litertlm/jni/litertlm.cc
+@@ -667,6 +667,14 @@
+     settings->GetMutableMainExecutorSettings().SetAdvancedSettings(
+         advanced_settings);
+   }
++
++  // Isolated Android trial: request low GPU context/queue priority.
++  auto priority_settings =
++      settings->GetMainExecutorSettings().GetAdvancedSettings().value_or(
++          litert::lm::AdvancedSettings());
++  priority_settings.gpu_context_low_priority = true;
++  settings->GetMutableMainExecutorSettings().SetAdvancedSettings(priority_settings);
++  ABSL_LOG(INFO) << "LITERT_PRIORITY_TEST | gpu_context_low_priority=true";
+ 
+   auto engine = EngineFactory::CreateDefault(*settings);
+   if (!engine.ok()) {
