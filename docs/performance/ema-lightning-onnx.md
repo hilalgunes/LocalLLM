@@ -1,0 +1,11 @@
+# EMA Lightning in Test chat
+
+The existing Test form is retained: classification controls, runtime/model selection, question, Send, answer and details. Provider choices share a row, cards use consistent spacing, and the question card contains microphone and speaker controls. No other runtime/version or embedding changes are included.
+
+The microphone uses Android ACTION_RECOGNIZE_SPEECH with tr-TR. A successful result is submitted to the existing Test flow and enables voice output. Recognition uses the installed Android provider and may need internet. Cancellation does not submit. The speaker toggle enables/disables EMA reading. While the model generates text, completed sentences or short groups of whole words are queued for speech. Any trailing text is flushed when generation finishes. Model loading starts when voice is enabled.
+
+EMA runs locally through the upstream ONNX Runtime Web 1.30.0 WASM pipeline, including Turkish number/time normalization. Model revision: 13c431db0356b2f7fafb1247cd823ec0d777c820 from https://huggingface.co/ozcancelik/ema-lightning-onnx. First use downloads roughly 36 MB of graphs, normalization and runtime files. Model files use Cache Storage when available. 48 kHz PCM chunks are scheduled immediately through Web Audio as the decoder yields them. A complete WAV is prepared afterward for replay. The speech view survives scrolling; Stop clears pending synthesis/playback, replay is available, and disabling speech destroys the view. Speech tracks the consumed prefix so streamed updates do not repeat earlier words.
+
+Bundled upstream sources and their Apache-2.0 license/third-party notices are in app/src/main/assets/ema. tts.js is modified for single-threaded WebView WASM without proxy workers and cleanup after initialization failure. No Android JavaScript interface is exposed; answer strings are JSON-escaped. File/content access and navigation are disabled.
+
+Validation: Kotlin compilation, existing unit tests, real-device EMA automatic-playback smoke test and injected speech-recognition result/cancellation test on Samsung SM-N975F / Android 12. The actual Test-page screenshot was inspected for layout. Keyboard insets are handled once at the main Scaffold, and bottom navigation is hidden while the keyboard is visible.

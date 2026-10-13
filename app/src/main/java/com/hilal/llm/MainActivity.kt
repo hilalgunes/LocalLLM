@@ -17,6 +17,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -146,16 +151,17 @@ class MainActivity : ComponentActivity() {
             LLMTheme {
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
                 val navController = rememberNavController()
+                val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
                 Scaffold(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().imePadding(),
                     bottomBar = {
-                        MainBottomNavigation(navController = navController)
+                        if (!keyboardVisible) MainBottomNavigation(navController = navController)
                     }
                 ) { innerPadding ->
                     NavHost(
                         navController = navController,
                         startDestination = MainDestination.RUN.route,
-                        modifier = Modifier.padding(innerPadding)
+                        modifier = Modifier.padding(innerPadding).consumeWindowInsets(innerPadding)
                     ) {
                         composable(MainDestination.RUN.route) {
                             RunScreen(

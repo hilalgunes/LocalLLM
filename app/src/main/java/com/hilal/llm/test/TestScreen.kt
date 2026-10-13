@@ -1,5 +1,22 @@
 package com.hilal.llm.test
 
+import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconToggleButton
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -54,136 +71,204 @@ fun TestScreen(
     var detailsExpanded by rememberSaveable { mutableStateOf(false) }
     // Do not persist API keys in saved state or on disk.
     var jevApiKey by remember { mutableStateOf("") }
-    val selectedModel = benchmarkState.selectedCatalogModel
-
-    LazyColumn(
-        modifier = modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        item { Text("Test", style = MaterialTheme.typography.headlineSmall) }
-        item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("İK sınıflandırması", style = MaterialTheme.typography.titleMedium)
-                    ClassificationProvider.entries.forEach { provider ->
-                        FilterChip(
-                            selected = testState.classificationProvider == provider,
-                            onClick = { onClassificationProviderSelected(provider) },
-                            enabled = !testState.isRunning,
-                            label = { Text(provider.label) }
-                        )
-                    }
-                    if (testState.classificationProvider == ClassificationProvider.JEV) {
-                        Text("Soru sınıflandırma için TypeSafe servisine gönderilir. Son cevabı aşağıdaki yerel model üretir.")
-                        OutlinedTextField(
-                            value = jevApiKey,
-                            onValueChange = { jevApiKey = it },
-                            label = { Text("TypeSafe API anahtarı") },
-                            visualTransformation = PasswordVisualTransformation(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                            singleLine = true,
-                            enabled = !testState.isRunning,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Text("Anahtar yalnızca bu ekranın belleğinde tutulur; kaydedilmez.", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-            }
-        }
-
-
-        item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text("Local model", style = MaterialTheme.typography.titleMedium)
-                    TestRuntimeDropdown(
-                        selectedEngine = benchmarkState.selectedEngineType,
-                        onRuntimeSelected = onRuntimeSelected
-                    )
-                    TestModelDropdown(
-                        benchmarkState = benchmarkState,
-                        onModelSelected = onModelSelected
-                    )
-                    benchmarkState.activeDownloadModelId?.let { modelId ->
-                        val model = benchmarkState.availableModels.firstOrNull { it.id == modelId }
-                        val state = benchmarkState.modelDownloadStates[modelId]
-                        Text("İndiriliyor: ${model?.displayName ?: modelId}${downloadProgress(state)}")
-                        TextButton(onClick = onCancelDownload) { Text("İndirmeyi iptal et") }
-                    }
-                }
-            }
-        }
-
-        item {
-            OutlinedTextField(
-                value = testState.question,
-                onValueChange = onQuestionChanged,
-                label = { Text("Soru") },
-                minLines = 4,
-                maxLines = 8,
-                enabled = !testState.isRunning,
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-
-        item {
-            Button(
-                onClick = { onSubmit(jevApiKey) },
-                enabled = !testState.isRunning,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                if (testState.isRunning) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.padding(end = 8.dp),
-                        strokeWidth = 2.dp
-                    )
-                    Text("Çalışıyor…")
-                } else {
-                    Text("Gönder")
-                }
-            }
-        }
-
-        if (selectedModel == null) {
-            item { Text("Önce bir local generation modeli seçin.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        }
-        testState.errorMessage?.let { message ->
-            item { Text(message, color = MaterialTheme.colorScheme.error) }
-        }
-        if (testState.answer.isNotBlank()) {
-            item {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Yanıt", style = MaterialTheme.typography.titleMedium)
-                        Text(testState.answer)
-                    }
-                }
-            }
-        }
-        if (testState.classificationResult != null || testState.isRunning || testState.errorMessage != null) {
-            item {
-                OutlinedButton(
-                    onClick = { detailsExpanded = !detailsExpanded },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (detailsExpanded) "Detayları gizle" else "Detaylar")
-                }
-            }
-            if (detailsExpanded) {
-                item { TestDetails(testState) }
-            }
+    var readAloud by rememberSaveable { mutableStateOf(false) }
+    var listening by rememberSaveable { mutableStateOf(false) }
+    var voiceError by remember { mutableStateOf<String?>(null) }
+    val speechLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        listening = false
+        if (result.resultCode == Activity.RESULT_OK && !testState.isRunning) {
+            val question = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()?.trim().orEmpty()
+            if (question.isNotEmpty()) {
+                onQuestionChanged(question)
+                onSubmit(jevApiKey)
+            } else voiceError = "Konuşma anlaşılamadı. Tekrar deneyin."
         }
     }
+    val selectedModel = benchmarkState.selectedCatalogModel
 
+    Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item { Text("Test", style = MaterialTheme.typography.headlineSmall) }
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("İK sınıflandırması", style = MaterialTheme.typography.titleMedium)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ClassificationProvider.entries.forEach { provider ->
+                                FilterChip(
+                                    selected = testState.classificationProvider == provider,
+                                    onClick = { onClassificationProviderSelected(provider) },
+                                    enabled = !testState.isRunning,
+                                    label = { Text(provider.label) }
+                                )
+                            }
+                        }
+                        if (testState.classificationProvider == ClassificationProvider.JEV) {
+                            Text("Soru sınıflandırma için TypeSafe servisine gönderilir. Son cevabı aşağıdaki yerel model üretir.")
+                            OutlinedTextField(
+                                value = jevApiKey,
+                                onValueChange = { jevApiKey = it },
+                                label = { Text("TypeSafe API anahtarı") },
+                                visualTransformation = PasswordVisualTransformation(),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                                singleLine = true,
+                                enabled = !testState.isRunning,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Text("Anahtar yalnızca bu ekranın belleğinde tutulur; kaydedilmez.", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+
+
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("Local model", style = MaterialTheme.typography.titleMedium)
+                        TestRuntimeDropdown(
+                            selectedEngine = benchmarkState.selectedEngineType,
+                            onRuntimeSelected = onRuntimeSelected
+                        )
+                        TestModelDropdown(
+                            benchmarkState = benchmarkState,
+                            onModelSelected = onModelSelected
+                        )
+                        benchmarkState.activeDownloadModelId?.let { modelId ->
+                            val model = benchmarkState.availableModels.firstOrNull { it.id == modelId }
+                            val state = benchmarkState.modelDownloadStates[modelId]
+                            Text("İndiriliyor: ${model?.displayName ?: modelId}${downloadProgress(state)}")
+                            TextButton(onClick = onCancelDownload) { Text("İndirmeyi iptal et") }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Soru", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                            IconToggleButton(checked = readAloud, onCheckedChange = { readAloud = it }) {
+                                Icon(
+                                    if (readAloud) Icons.AutoMirrored.Filled.VolumeUp else Icons.AutoMirrored.Filled.VolumeOff,
+                                    if (readAloud) "Sesli yanıtı kapat" else "Sesli yanıtı aç",
+                                    tint = if (readAloud) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            IconButton(enabled = !testState.isRunning && !listening, onClick = {
+                                voiceError = null
+                                if (selectedModel == null) voiceError = "Önce bir local generation modeli seçin."
+                                else if (testState.classificationProvider == ClassificationProvider.JEV && jevApiKey.isBlank()) {
+                                    voiceError = "Jev için TypeSafe API anahtarını girin."
+                                } else try {
+                                    readAloud = true
+                                    listening = true
+                                    speechLauncher.launch(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                                        putExtra(RecognizerIntent.EXTRA_LANGUAGE, "tr-TR")
+                                        putExtra(RecognizerIntent.EXTRA_PROMPT, "Sorunuzu söyleyin")
+                                        putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                                    })
+                                } catch (_: ActivityNotFoundException) {
+                                    listening = false
+                                    voiceError = "Bu cihazda konuşma tanıma uygulaması bulunamadı."
+                                } catch (_: SecurityException) {
+                                    listening = false
+                                    voiceError = "Konuşma tanıma uygulamasının mikrofon iznini kontrol edin."
+                                }
+                            }) { Icon(Icons.Default.Mic, "Soruyu sesli söyle", tint = MaterialTheme.colorScheme.primary) }
+                        }
+                        OutlinedTextField(
+                            value = testState.question,
+                            onValueChange = onQuestionChanged,
+                            placeholder = { Text("Sorunuzu yazın veya mikrofonla söyleyin…") },
+                            minLines = 3, maxLines = 8,
+                            enabled = !testState.isRunning && !listening,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Text(
+                            if (listening) "Dinleniyor…" else if (readAloud) "Yanıt EMA ile otomatik seslendirilecek." else "Mikrofonla soru sorabilir, sesli yanıtı hoparlörden açabilirsiniz.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        voiceError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    }
+                }
+            }
+
+            item {
+                Button(
+                    onClick = { onSubmit(jevApiKey) },
+                    enabled = !testState.isRunning && !listening,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    if (testState.isRunning) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.padding(end = 8.dp).size(20.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Text("Çalışıyor…")
+                    } else {
+                        Text("Gönder")
+                    }
+                }
+            }
+
+            if (selectedModel == null) {
+                item { Text("Önce bir local generation modeli seçin.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+            testState.errorMessage?.let { message ->
+                item { Text(message, color = MaterialTheme.colorScheme.error) }
+            }
+            if (testState.answer.isNotBlank()) {
+                item {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Yanıt", style = MaterialTheme.typography.titleMedium)
+                            Text(testState.answer)
+                        }
+                    }
+                }
+            }
+            if (testState.classificationResult != null || testState.isRunning || testState.errorMessage != null) {
+                item {
+                    OutlinedButton(
+                        onClick = { detailsExpanded = !detailsExpanded },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(if (detailsExpanded) "Detayları gizle" else "Detaylar")
+                    }
+                }
+                if (detailsExpanded) {
+                    item { TestDetails(testState) }
+                }
+            }
+        }
+        // Keep the engine outside the lazy list so scrolling does not stop speech.
+        if (readAloud) {
+            EmaTtsCard(
+                answer = if (listening || testState.errorMessage != null) "" else testState.answer,
+                answerReady = !testState.isRunning,
+                autoRead = true
+            )
+        }
+    }
 }
 
 @Composable
 private fun TestDetails(state: TestUiState) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Sınıflandırma yöntemi: ${(state.resultProvider ?: state.classificationProvider).label}")
             state.jevModel?.let { Text("Jev modeli: $it") }
             state.jevConfidence?.let { Text("Jev güven skoru: ${String.format(Locale.ROOT, "%.3f", it)}") }
