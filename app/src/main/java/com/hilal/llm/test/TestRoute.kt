@@ -19,12 +19,14 @@ fun TestRoute(
         testState = testState,
         benchmarkState = benchmarkState,
         onQuestionChanged = testViewModel::updateQuestion,
+        onClassificationProviderSelected = testViewModel::selectClassificationProvider,
         onRuntimeSelected = benchmarkViewModel::setEngine,
         onModelSelected = benchmarkViewModel::selectCatalogModel,
         onCancelDownload = benchmarkViewModel::cancelModelDownload,
-        onSubmit = {
+        onSubmit = { jevApiKey ->
             testViewModel.submit(
                 selection = benchmarkState.selectedCatalogModel,
+                jevApiKey = jevApiKey,
                 openSession = benchmarkViewModel::openFeatureGenerationSession
             )
         },

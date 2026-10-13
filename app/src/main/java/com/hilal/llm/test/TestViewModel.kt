@@ -7,6 +7,8 @@ import androidx.lifecycle.viewModelScope
 import com.hilal.llm.benchmark.FeatureGenerationSession
 import com.hilal.llm.catalog.BenchmarkModelSelection
 import com.hilal.llm.catalog.RuntimeType
+import com.hilal.llm.test.network.JevClassifier
+import com.hilal.llm.test.network.JevClassification
 import com.hilal.llm.test.network.RetrievalException
 import com.hilal.llm.test.network.RetrievalRepository
 import com.hilal.llm.test.network.RetrievalResult
@@ -25,8 +27,17 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 
+enum class ClassificationProvider(val label: String) {
+    LOCAL("Yerel model"), JEV("Jev (online)")
+}
+
 data class TestUiState(
     val question: String = "",
+    val classificationProvider: ClassificationProvider = ClassificationProvider.LOCAL,
+    val resultProvider: ClassificationProvider? = null,
+    val jevModel: String? = null,
+    val jevConfidence: Double? = null,
+    val jevHrProbability: Double? = null,
     val isRunning: Boolean = false,
     val classificationResult: String? = null,
     val retrievalStatus: RetrievalStatus = RetrievalStatus.Idle,
@@ -48,7 +59,8 @@ sealed interface RetrievalStatus {
 }
 
 class TestViewModel(
-    private val retrievalRepository: RetrievalRepository = RetrievalRepository()
+    private val retrievalRepository: RetrievalRepository = RetrievalRepository(),
+    private val jevClassifier: JevClassifier = JevClassifier()
 ) : ViewModel() {
     companion object {
         private const val TAG = "TEST_FLOW"
@@ -66,8 +78,14 @@ class TestViewModel(
         _uiState.update { it.copy(question = question, errorMessage = null) }
     }
 
+    fun selectClassificationProvider(provider: ClassificationProvider) {
+        if (_uiState.value.isRunning) return
+        _uiState.update { TestUiState(question = it.question, classificationProvider = provider) }
+    }
+
     fun submit(
         selection: BenchmarkModelSelection?,
+        jevApiKey: String = "",
         openSession: suspend (BenchmarkModelSelection) -> FeatureGenerationSession
     ) {
         val question = _uiState.value.question.trim()
@@ -77,6 +95,13 @@ class TestViewModel(
         }
         if (selection == null) {
             _uiState.update { it.copy(errorMessage = "Önce bir local generation modeli seçin.") }
+            return
+        }
+
+        val provider = _uiState.value.classificationProvider
+        val apiKey = jevApiKey.trim()
+        if (provider == ClassificationProvider.JEV && apiKey.isEmpty()) {
+            _uiState.update { it.copy(errorMessage = "Jev için TypeSafe API anahtarını girin.") }
             return
         }
 
@@ -90,6 +115,10 @@ class TestViewModel(
                 it.copy(
                     isRunning = true,
                     classificationResult = null,
+                    resultProvider = provider,
+                    jevModel = null,
+                    jevConfidence = null,
+                    jevHrProbability = null,
                     retrievalStatus = RetrievalStatus.Running,
                     retrievalTimeMs = null,
                     retrievedChunks = emptyList(),
@@ -128,6 +157,12 @@ class TestViewModel(
                         val classificationDeferred = async {
                             val startedAt = SystemClock.elapsedRealtime()
                             Log.d(TAG, "TEST_FLOW | [1. AŞAMA] İK sınıflandırması başladı")
+                            if (provider == ClassificationProvider.JEV) {
+                                val decision = jevClassifier.classify(question, apiKey)
+                                val elapsed = SystemClock.elapsedRealtime() - startedAt
+                                Log.d(TAG, "TEST_FLOW | Jev classification | result=${decision.result} | model=${decision.model} | elapsedMs=$elapsed")
+                                return@async TimedClassification(decision.result, elapsed, decision)
+                            }
                             if (isLiteRt) Log.d(PERF_TAG, "LITERT_PERF | Classification started")
                             try {
                                 val classificationPrompt = buildClassificationPrompt(question)
@@ -165,7 +200,10 @@ class TestViewModel(
                         updateIfCurrent(requestId) {
                             it.copy(
                                 classificationResult = classification.result,
-                                classificationTimeMs = classification.elapsedMs
+                                classificationTimeMs = classification.elapsedMs,
+                                jevModel = classification.jev?.model,
+                                jevConfidence = classification.jev?.confidence,
+                                jevHrProbability = classification.jev?.hrProbability
                             )
                         }
                         Log.d(TAG, "TEST_FLOW | Classification sonucu = ${classification.result}")
@@ -230,7 +268,7 @@ class TestViewModel(
                         logFlowText("[LLM #2] Prompt", finalPrompt)
                         if (isLiteRt) Log.d(PERF_TAG, "LITERT_PERF | Final generation started")
                         val answer = try {
-                            checkNotNull(flowSession) { "Feature generation session is not initialized." }
+                            (flowSession ?: openSession(selection).also { flowSession = it })
                                 .generate(finalPrompt, ANSWER_MAX_TOKENS) { partialAnswer ->
                                     updateIfCurrent(requestId) { it.copy(answer = partialAnswer) }
                                 }
@@ -347,7 +385,7 @@ class TestViewModel(
         Kullanıcı ayrıntı istemedikçe en fazla 3 kısa cümle kullan.
     """.trimIndent()
 
-    private data class TimedClassification(val result: String, val elapsedMs: Long)
+    private data class TimedClassification(val result: String, val elapsedMs: Long, val jev: JevClassification? = null)
     private data class TimedRetrieval(val result: RetrievalResult, val elapsedMs: Long)
     private class TimedRetrievalFailure(override val cause: Throwable, val elapsedMs: Long) : Exception(cause)
     private class EmptyRetrievalFailure : Exception()

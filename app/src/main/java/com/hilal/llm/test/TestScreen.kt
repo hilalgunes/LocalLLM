@@ -7,6 +7,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.FilterChip
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -40,13 +44,16 @@ fun TestScreen(
     testState: TestUiState,
     benchmarkState: BenchmarkUiState,
     onQuestionChanged: (String) -> Unit,
+    onClassificationProviderSelected: (ClassificationProvider) -> Unit,
     onRuntimeSelected: (EngineType) -> Unit,
     onModelSelected: (String) -> Unit,
     onCancelDownload: () -> Unit,
-    onSubmit: () -> Unit,
+    onSubmit: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var detailsExpanded by rememberSaveable { mutableStateOf(false) }
+    // Do not persist API keys in saved state or on disk.
+    var jevApiKey by remember { mutableStateOf("") }
     val selectedModel = benchmarkState.selectedCatalogModel
 
     LazyColumn(
@@ -54,6 +61,36 @@ fun TestScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item { Text("Test", style = MaterialTheme.typography.headlineSmall) }
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("İK sınıflandırması", style = MaterialTheme.typography.titleMedium)
+                    ClassificationProvider.entries.forEach { provider ->
+                        FilterChip(
+                            selected = testState.classificationProvider == provider,
+                            onClick = { onClassificationProviderSelected(provider) },
+                            enabled = !testState.isRunning,
+                            label = { Text(provider.label) }
+                        )
+                    }
+                    if (testState.classificationProvider == ClassificationProvider.JEV) {
+                        Text("Soru sınıflandırma için TypeSafe servisine gönderilir. Son cevabı aşağıdaki yerel model üretir.")
+                        OutlinedTextField(
+                            value = jevApiKey,
+                            onValueChange = { jevApiKey = it },
+                            label = { Text("TypeSafe API anahtarı") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            singleLine = true,
+                            enabled = !testState.isRunning,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Text("Anahtar yalnızca bu ekranın belleğinde tutulur; kaydedilmez.", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
+
 
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
@@ -94,7 +131,7 @@ fun TestScreen(
 
         item {
             Button(
-                onClick = onSubmit,
+                onClick = { onSubmit(jevApiKey) },
                 enabled = !testState.isRunning,
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -147,6 +184,10 @@ fun TestScreen(
 private fun TestDetails(state: TestUiState) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Sınıflandırma yöntemi: ${(state.resultProvider ?: state.classificationProvider).label}")
+            state.jevModel?.let { Text("Jev modeli: $it") }
+            state.jevConfidence?.let { Text("Jev güven skoru: ${String.format(Locale.ROOT, "%.3f", it)}") }
+            state.jevHrProbability?.let { Text("İK olasılığı: ${String.format(Locale.ROOT, "%.3f", it)}") }
             Text("Classification: ${state.classificationResult ?: if (state.isRunning) "Çalışıyor" else "-"}")
             Text("Classification süresi: ${formatDuration(state.classificationTimeMs)}")
             Text("Retrieval: ${retrievalLabel(state.retrievalStatus)}")
