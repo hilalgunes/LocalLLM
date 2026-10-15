@@ -721,7 +721,9 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
                 val resolver = contentResolver ?: throw IllegalStateException("Embedding provider is not initialized.")
                 LlamaCppRagEmbeddingProvider(resolver)
             }
-            RuntimeType.LITERT -> LiteRtGeckoRagEmbeddingProvider()
+            RuntimeType.LITERT -> if (embeddingModel.modelId.startsWith("embeddinggemma-2")) {
+                LiteRtEmbeddingGemmaRagEmbeddingProvider(appContext.cacheDir)
+            } else LiteRtGeckoRagEmbeddingProvider()
             RuntimeType.ONNX -> throw IllegalStateException("ONNX embedding provider is not configured.")
             RuntimeType.EXECUTORCH -> throw IllegalStateException(
                 "${embeddingModel.displayName} için ExecuTorch embedding provider bağlı değil."

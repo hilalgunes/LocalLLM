@@ -35,6 +35,8 @@ val ragGenerationModelIds = setOf(
 )
 
 val ragEmbeddingModelIds = setOf(
+    "embeddinggemma-2-text-270m-litert",
+    "embeddinggemma-2-740m-litert",
     "qwen3-embedding-0.6b-gguf",
     "multilingual-e5-small-gguf",
     "all-minilm-l6-v2-gguf",

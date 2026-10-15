@@ -25,7 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 @Composable
-fun CompareScreen(modifier: Modifier = Modifier) {
+fun CompareScreen(modifier: Modifier = Modifier, onEmbeddingComparison: () -> Unit = {}) {
     var prompt by rememberSaveable { mutableStateOf("") }
     val runtimeLabels = listOf("Llama.cpp", "LiteRT", "ExecuTorch")
 
@@ -35,6 +35,15 @@ fun CompareScreen(modifier: Modifier = Modifier) {
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Embedding karşılaştır", style = MaterialTheme.typography.titleMedium)
+                    Text("270M ve 740M: metin araması ve görsel arama ölçümleri.")
+                    Button(onClick = onEmbeddingComparison, modifier = Modifier.fillMaxWidth()) { Text("Embedding sayfasını aç") }
+                }
+            }
+        }
         item {
             Text("Runtime Compare", style = MaterialTheme.typography.headlineSmall)
             Text(

@@ -1,0 +1,244 @@
+{
+  "androidVersion": "12",
+  "artifactSha256": {
+    "embeddinggemma-2-text-270m-litert/embeddinggemma-2-text-270m.litertlm": "2d079ee2f6f066b1f368e8d7c819f55214eaef1d0513b312321901f30ab286fb",
+    "embeddinggemma-2-740m-litert/embeddinggemma-2-740m.litertlm": "e7a8a2204b91e0f96e92960e84a09a89212e1633dcb7575a9bf3378b4df77f4c"
+  },
+  "dataset": {
+    "passages": [
+      "Çalışanların yıllık izin başvurusu en az yedi gün önceden yöneticisine iletilmelidir.",
+      "Bir ile beş yıl arasında kıdemi olan çalışanlar yılda en az on dört gün ücretli izin kullanabilir.",
+      "Ürünler satın alma tarihinden itibaren on dört gün içinde faturasıyla iade edilebilir."
+    ],
+    "queries": [
+      {
+        "question": "İzin talebimi ne kadar önceden bildirmeliyim?",
+        "reference": "En az yedi gün önceden.",
+        "relevant": [
+          1
+        ]
+      }
+    ]
+  },
+  "device": "samsung SM-N975F",
+  "executionOrder": [
+    "embeddinggemma-2-text-270m-litert",
+    "embeddinggemma-2-740m-litert"
+  ],
+  "generationModel": "Gemma 4 E2B IT LiteRT-LM",
+  "method": "Exact cosine retrieval; fresh embedding provider per round; alternating AB/BA order. Gemma CPU/4 threads/2048 input tokens; Gecko default CPU; GGUF CPU auto threads/512 context. Timings exclude downloads. PSS is whole-process memory sampled every 200ms, not isolated model RAM. OS file caches are not flushed. Text-only RAG, not image/audio evaluation. Generation uses the same model and prompt template, with a warmup. LiteRT keeps one loaded engine; other generation runtimes may reload per request, included in TTFT/total timing. Reference token F1 is lexical overlap, not factual correctness.",
+  "modelConfigs": [
+    {
+      "description": "Text-only on-device embeddings.",
+      "displayName": "EmbeddingGemma 2 Text 270M LiteRT",
+      "engineType": "LITERT_LM",
+      "estimatedSize": "~165 MB",
+      "estimatedSizeBytes": 164626432,
+      "family": "EmbeddingGemma",
+      "files": [
+        {
+          "fileName": "embeddinggemma-2-text-270m.litertlm",
+          "minBytes": 164626432,
+          "required": true,
+          "type": "LITERT_BUNDLE",
+          "url": "https://huggingface.co/litert-community/embeddinggemma-2-text-270m-litert-lm/resolve/main/embeddinggemma-2-text-270m.litertlm"
+        }
+      ],
+      "id": "embeddinggemma-2-text-270m-litert",
+      "isEnabled": true,
+      "promptTemplateType": "GENERIC",
+      "purpose": "EMBEDDING",
+      "quantization": "INT4 QAT",
+      "runtimeType": "LITERT"
+    },
+    {
+      "description": "Multimodal bundle; RAG uses its 270M text backbone only.",
+      "displayName": "EmbeddingGemma 2 740M LiteRT",
+      "engineType": "LITERT_LM",
+      "estimatedSize": "~485 MB",
+      "estimatedSizeBytes": 484622336,
+      "family": "EmbeddingGemma",
+      "files": [
+        {
+          "fileName": "embeddinggemma-2-740m.litertlm",
+          "minBytes": 484622336,
+          "required": true,
+          "type": "LITERT_BUNDLE",
+          "url": "https://huggingface.co/litert-community/embeddinggemma-2-740m-litert-lm/resolve/main/embeddinggemma-2-740m.litertlm"
+        }
+      ],
+      "id": "embeddinggemma-2-740m-litert",
+      "isEnabled": true,
+      "promptTemplateType": "GENERIC",
+      "purpose": "EMBEDDING",
+      "quantization": "Text INT4 / vision INT8 / mixed audio",
+      "runtimeType": "LITERT"
+    }
+  ],
+  "outputDimension": 128,
+  "ratings": {},
+  "repeats": 1,
+  "results": [
+    {
+      "baselinePssMb": 226.935546875,
+      "cases": [
+        {
+          "answer": {
+            "firstTextMs": 982.001538,
+            "text": "Verilen kaynaklarda izin talebinin ne kadar önceden bildirileceğine dair bir bilgi bulunmamaktadır.",
+            "totalMs": 2994.168498
+          },
+          "fullRanking": [
+            {
+              "passage": 2,
+              "relevant": false,
+              "score": 0.7635556758982577,
+              "text": "Bir ile beş yıl arasında kıdemi olan çalışanlar yılda en az on dört gün ücretli izin kullanabilir."
+            },
+            {
+              "passage": 1,
+              "relevant": true,
+              "score": 0.7533497491149559,
+              "text": "Çalışanların yıllık izin başvurusu en az yedi gün önceden yöneticisine iletilmelidir."
+            },
+            {
+              "passage": 3,
+              "relevant": false,
+              "score": 0.7532892274270244,
+              "text": "Ürünler satın alma tarihinden itibaren on dört gün içinde faturasıyla iade edilebilir."
+            }
+          ],
+          "query": {
+            "question": "İzin talebimi ne kadar önceden bildirmeliyim?",
+            "reference": "En az yedi gün önceden.",
+            "relevant": [
+              1
+            ]
+          },
+          "queryEmbeddingMs": [
+            200.905192
+          ],
+          "referenceOverlap": 0.11764705882352941,
+          "retrieval": {
+            "hit": false,
+            "ndcg": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reciprocalRank": 0.5
+          },
+          "searchMs": [
+            3.484231
+          ],
+          "sources": [
+            {
+              "passage": 2,
+              "relevant": false,
+              "score": 0.7635556758982577,
+              "text": "Bir ile beş yıl arasında kıdemi olan çalışanlar yılda en az on dört gün ücretli izin kullanabilir."
+            }
+          ]
+        }
+      ],
+      "dimension": 128,
+      "fileBytes": 164626432,
+      "firstEmbeddingMs": [
+        291.562154
+      ],
+      "indexingMs": [
+        570.778115
+      ],
+      "initializeMs": [
+        507.380115
+      ],
+      "modelId": "embeddinggemma-2-text-270m-litert",
+      "name": "EmbeddingGemma 2 Text 270M LiteRT",
+      "quantization": "INT4 QAT",
+      "runtime": "LITERT",
+      "sampledPeakPssMb": 486.443359375,
+      "vectorBytes": 1536,
+      "vectorNorm": 1.0000000532099302
+    },
+    {
+      "baselinePssMb": 342.994140625,
+      "cases": [
+        {
+          "answer": {
+            "firstTextMs": 751.725538,
+            "text": "Verilen kaynaklarda izin talebinin ne kadar önceden bildirileceğine dair bir bilgi bulunmamaktadır.",
+            "totalMs": 2888.843037
+          },
+          "fullRanking": [
+            {
+              "passage": 2,
+              "relevant": false,
+              "score": 0.7635556758982577,
+              "text": "Bir ile beş yıl arasında kıdemi olan çalışanlar yılda en az on dört gün ücretli izin kullanabilir."
+            },
+            {
+              "passage": 1,
+              "relevant": true,
+              "score": 0.7533497491149559,
+              "text": "Çalışanların yıllık izin başvurusu en az yedi gün önceden yöneticisine iletilmelidir."
+            },
+            {
+              "passage": 3,
+              "relevant": false,
+              "score": 0.7532892274270244,
+              "text": "Ürünler satın alma tarihinden itibaren on dört gün içinde faturasıyla iade edilebilir."
+            }
+          ],
+          "query": {
+            "question": "İzin talebimi ne kadar önceden bildirmeliyim?",
+            "reference": "En az yedi gün önceden.",
+            "relevant": [
+              1
+            ]
+          },
+          "queryEmbeddingMs": [
+            200.296692
+          ],
+          "referenceOverlap": 0.11764705882352941,
+          "retrieval": {
+            "hit": false,
+            "ndcg": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "reciprocalRank": 0.5
+          },
+          "searchMs": [
+            0.133539
+          ],
+          "sources": [
+            {
+              "passage": 2,
+              "relevant": false,
+              "score": 0.7635556758982577,
+              "text": "Bir ile beş yıl arasında kıdemi olan çalışanlar yılda en az on dört gün ücretli izin kullanabilir."
+            }
+          ]
+        }
+      ],
+      "dimension": 128,
+      "fileBytes": 484622336,
+      "firstEmbeddingMs": [
+        293.860577
+      ],
+      "indexingMs": [
+        594.912423
+      ],
+      "initializeMs": [
+        686.240615
+      ],
+      "modelId": "embeddinggemma-2-740m-litert",
+      "name": "EmbeddingGemma 2 740M LiteRT",
+      "quantization": "Text INT4 / vision INT8 / mixed audio",
+      "runtime": "LITERT",
+      "sampledPeakPssMb": 556.59765625,
+      "vectorBytes": 1536,
+      "vectorNorm": 1.0000000532099302
+    }
+  ],
+  "schemaVersion": 2,
+  "startedAt": 1791892531278,
+  "topK": 1
+}

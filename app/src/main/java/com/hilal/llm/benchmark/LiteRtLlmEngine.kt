@@ -208,7 +208,7 @@ class LiteRtLlmEngine(
             samplerConfig = samplerConfig,
             automaticToolCalling = false,
             channels = emptyList(),
-            extraContext = mapOf("max_output_tokens" to maxTokens)
+            maxOutputToken = maxTokens
         )
     }
 

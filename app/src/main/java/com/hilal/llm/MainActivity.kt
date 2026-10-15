@@ -68,6 +68,9 @@ import com.hilal.llm.benchmark.history.BenchmarkHistoryRoute
 import com.hilal.llm.benchmark.history.BenchmarkHistoryViewModel
 import com.hilal.llm.navigation.MainBottomNavigation
 import com.hilal.llm.navigation.MainDestination
+import com.hilal.llm.rag.RagComparisonRoute
+import com.hilal.llm.rag.ImageComparisonViewModel
+import com.hilal.llm.rag.RagComparisonViewModel
 import com.hilal.llm.rag.RagRoute
 import com.hilal.llm.rag.RagViewModel
 import com.hilal.llm.test.TestRoute
@@ -81,6 +84,8 @@ import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 class MainActivity : ComponentActivity() {
     private val viewModel: BenchmarkViewModel by viewModels()
     private val ragViewModel: RagViewModel by viewModels()
+    private val embeddingComparisonViewModel: RagComparisonViewModel by viewModels()
+    private val imageComparisonViewModel: ImageComparisonViewModel by viewModels()
     private val historyViewModel: BenchmarkHistoryViewModel by viewModels()
     private val testViewModel: TestViewModel by viewModels()
 
@@ -185,7 +190,10 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         composable(MainDestination.COMPARE.route) {
-                            CompareScreen()
+                            CompareScreen(onEmbeddingComparison = { navController.navigate(MainDestination.EMBEDDING.route) })
+                        }
+                        composable(MainDestination.EMBEDDING.route) {
+                            RagComparisonRoute(embeddingComparisonViewModel, imageComparisonViewModel, onBack = { navController.navigateUp() })
                         }
                         composable(MainDestination.RAG.route) {
                             RagRoute(viewModel = ragViewModel)

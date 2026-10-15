@@ -419,6 +419,32 @@ object ModelCatalogRepository {
             disabledReason = null
         ),
         ModelConfig(
+            id = "embeddinggemma-2-text-270m-litert", displayName = "EmbeddingGemma 2 Text 270M LiteRT",
+            description = "Text-only on-device embeddings.", runtimeType = RuntimeType.LITERT,
+            engineType = EngineType.LITERT_LM, promptTemplateType = PromptTemplateType.GENERIC,
+            files = listOf(ModelFileConfig(
+                type = ModelFileType.LITERT_BUNDLE, fileName = "embeddinggemma-2-text-270m.litertlm",
+                url = "https://huggingface.co/litert-community/embeddinggemma-2-text-270m-litert-lm/resolve/main/embeddinggemma-2-text-270m.litertlm",
+                required = true, minBytes = 164626432L
+            )),
+            estimatedSize = "~165 MB", estimatedSizeBytes = 164626432L,
+            quantization = "INT4 QAT", isEnabled = true, disabledReason = null,
+            purpose = ModelPurpose.EMBEDDING
+        ),
+        ModelConfig(
+            id = "embeddinggemma-2-740m-litert", displayName = "EmbeddingGemma 2 740M LiteRT",
+            description = "Multimodal bundle; RAG uses its 270M text backbone only.", runtimeType = RuntimeType.LITERT,
+            engineType = EngineType.LITERT_LM, promptTemplateType = PromptTemplateType.GENERIC,
+            files = listOf(ModelFileConfig(
+                type = ModelFileType.LITERT_BUNDLE, fileName = "embeddinggemma-2-740m.litertlm",
+                url = "https://huggingface.co/litert-community/embeddinggemma-2-740m-litert-lm/resolve/main/embeddinggemma-2-740m.litertlm",
+                required = true, minBytes = 484622336L
+            )),
+            estimatedSize = "~485 MB", estimatedSizeBytes = 484622336L,
+            quantization = "Text INT4 / vision INT8 / mixed audio", isEnabled = true, disabledReason = null,
+            purpose = ModelPurpose.EMBEDDING
+        ),
+        ModelConfig(
             id = "qwen3-embedding-0.6b-gguf",
             displayName = "Qwen3 Embedding 0.6B GGUF",
             description = "Text embedding model for semantic retrieval and ranking.",

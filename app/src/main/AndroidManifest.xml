@@ -35,6 +35,7 @@
             android:name=".catalog.ui.ModelCatalogActivity"
             android:exported="false"
             android:theme="@style/Theme.LLM" />
+        <activity android:name=".rag.RagComparisonActivity" android:exported="false" android:theme="@style/Theme.LLM" />
         <activity
             android:name=".rag.RagActivity"
             android:exported="false"
