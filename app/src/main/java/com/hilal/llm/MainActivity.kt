@@ -82,6 +82,7 @@ import androidx.navigation.compose.rememberNavController
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 
 class MainActivity : ComponentActivity() {
+    private val runtimeOwner: com.hilal.llm.inference.ModelRuntimeViewModel by viewModels()
     private val viewModel: BenchmarkViewModel by viewModels()
     private val ragViewModel: RagViewModel by viewModels()
     private val embeddingComparisonViewModel: RagComparisonViewModel by viewModels()
@@ -135,18 +136,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         PDFBoxResourceLoader.init(applicationContext)
-        viewModel.initializeLlamaEngine(
-            appContext = applicationContext,
-            contentResolver = contentResolver
-        )
-        viewModel.initializeLiteRtEngine(
-            appContext = applicationContext,
-            contentResolver = contentResolver
-        )
-        viewModel.initializeExecuTorchEngine(
-            appContext = applicationContext,
-            contentResolver = contentResolver
-        )
+        viewModel.attachRuntime(runtimeOwner.runtime)
         viewModel.initializeBenchmarkHistoryRepository(applicationContext)
         viewModel.initializeModelCatalog(applicationContext)
         ragViewModel.initializeEngines(contentResolver)
@@ -201,7 +191,11 @@ class MainActivity : ComponentActivity() {
                         composable(MainDestination.TEST.route) {
                             TestRoute(
                                 testViewModel = testViewModel,
-                                benchmarkViewModel = viewModel
+                                benchmarkState = uiState,
+                                onRuntimeSelected = viewModel::setEngine,
+                                onModelSelected = viewModel::selectCatalogModel,
+                                onCancelDownload = viewModel::cancelModelDownload,
+                                openSession = runtimeOwner.runtime.sessions::openSession
                             )
                         }
                         composable(MainDestination.HISTORY.route) {

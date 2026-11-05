@@ -1,6 +1,7 @@
 package com.hilal.llm.benchmark
 
-import android.content.ContentResolver
+import com.hilal.llm.inference.AndroidModelRuntime
+import com.hilal.llm.inference.validateCatalogSelectionForRun
 import android.content.Context
 import android.util.Log
 import androidx.lifecycle.ViewModel
@@ -25,9 +26,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import java.util.concurrent.atomic.AtomicBoolean
 
 class BenchmarkViewModel : ViewModel() {
     companion object {
@@ -37,41 +35,17 @@ class BenchmarkViewModel : ViewModel() {
         private const val TAG = "BenchmarkViewModel"
     }
 
-    private val onnxEngine = OnnxLlmEngine()
-    private val fakeEngine: LocalLlmEngine = FakeLlmEngine()
-    private var llamaEngine: LocalLlmEngine? = null
-    private var liteRtEngine: LocalLlmEngine? = null
-    private var execuTorchEngine: LocalLlmEngine? = null
-    private var selectedEngine: LocalLlmEngine = fakeEngine
-    private var engineFactory: LocalLlmEngineFactory =
-        LocalLlmEngineFactory(
-            execuTorchEngine = execuTorchEngine,
-            liteRtEngine = liteRtEngine,
-            llamaCppEngine = llamaEngine,
-            onnxEngine = onnxEngine,
-            manualFallbackEngine = selectedEngine
-        )
+    private lateinit var runtime: AndroidModelRuntime
+
+    fun attachRuntime(runtime: AndroidModelRuntime) {
+        this.runtime = runtime
+    }
+
     private val presetRepository = BenchmarkPresetRepository()
     private var benchmarkResultRepository: BenchmarkResultRepository? = null
     private var modelDownloadRepository: ModelDownloadRepository? = null
     private var modelRunFileMapper: ModelRunFileMapper? = null
     private var activeDownloadJob: Job? = null
-    private val featureGenerationMutex = Mutex()
-    private var cachedFeatureSession: LiteRtLlmEngine.Session? = null
-    private var cachedFeatureSelection: BenchmarkModelSelection? = null
-
-    override fun onCleared() {
-        super.onCleared()
-        // Finish any active lease before releasing native model memory.
-        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
-            featureGenerationMutex.withLock {
-                onnxEngine.release()
-                cachedFeatureSession?.close()
-                cachedFeatureSession = null
-                cachedFeatureSelection = null
-            }
-        }
-    }
     private val _uiState = MutableStateFlow(BenchmarkUiState())
     val uiState: StateFlow<BenchmarkUiState> = _uiState.asStateFlow()
 
@@ -99,55 +73,12 @@ class BenchmarkViewModel : ViewModel() {
         }
     }
 
-    fun initializeLlamaEngine(
-        appContext: Context,
-        contentResolver: ContentResolver
-    ) {
-        llamaEngine = LlamaCppLlmEngine(
-            appContext = appContext,
-            contentResolver = contentResolver
-        )
-        if (_uiState.value.selectedEngineType == EngineType.LLAMA_CPP) selectedEngine = llamaEngine!!
-        refreshEngineFactory()
-    }
-
-    fun initializeLiteRtEngine(
-        appContext: Context,
-        contentResolver: ContentResolver
-    ) {
-        liteRtEngine = LiteRtLlmEngine(
-            appContext = appContext,
-            contentResolver = contentResolver
-        )
-        if (_uiState.value.selectedEngineType == EngineType.LITERT) selectedEngine = liteRtEngine!!
-        refreshEngineFactory()
-    }
-
-    fun initializeExecuTorchEngine(
-        appContext: Context,
-        contentResolver: ContentResolver
-    ) {
-        execuTorchEngine = ExecuTorchLlmEngine(
-            appContext = appContext,
-            contentResolver = contentResolver
-        )
-        if (_uiState.value.selectedEngineType == EngineType.EXECUTORCH) selectedEngine = execuTorchEngine!!
-        refreshEngineFactory()
-    }
-
     fun setEngine(engineType: EngineType) {
         val targetRuntime = runtimeFor(engineType)
         val shouldClearCatalogSelection = _uiState.value.selectedModelConfig?.runtimeType != targetRuntime
         val activeDownloadModel = _uiState.value.activeDownloadModelId?.let(ModelCatalogRepository::getModelById)
         if (activeDownloadModel != null && activeDownloadModel.runtimeType != targetRuntime) {
             activeDownloadJob?.cancel()
-        }
-        selectedEngine = when (engineType) {
-            EngineType.ONNX -> onnxEngine
-            EngineType.FAKE -> fakeEngine
-            EngineType.LLAMA_CPP -> llamaEngine ?: fakeEngine
-            EngineType.LITERT -> liteRtEngine ?: fakeEngine
-            EngineType.EXECUTORCH -> execuTorchEngine ?: fakeEngine
         }
         _uiState.update {
             it.copy(
@@ -159,15 +90,10 @@ class BenchmarkViewModel : ViewModel() {
                 errorMessage = null
             )
         }
-        refreshEngineFactory()
     }
 
     fun onCatalogModelSelected(selection: BenchmarkModelSelection) {
         val mappedEngineType = mapRuntimeToEngine(selection.runtimeType)
-        selectedEngine = engineFactory.create(
-            engineType = selection.engineType,
-            runtimeType = selection.runtimeType
-        )
         _uiState.update {
             it.copy(
                 selectedEngineType = mappedEngineType,
@@ -188,7 +114,6 @@ class BenchmarkViewModel : ViewModel() {
                 }
             )
         }
-        refreshEngineFactory()
     }
 
     fun showModelPicker() {
@@ -538,113 +463,6 @@ class BenchmarkViewModel : ViewModel() {
         }
     }
 
-    suspend fun generateForFeature(
-        selection: BenchmarkModelSelection,
-        prompt: String,
-        maxTokens: Int
-    ): String = featureGenerationMutex.withLock {
-        validateCatalogSelectionForRun(selection)?.let { throw IllegalStateException(it) }
-        val engine = resolveEngineForRun(selection)
-        generateFeatureText(selection, prompt, maxTokens, engine::generate)
-    }
-
-    suspend fun openFeatureGenerationSession(
-        selection: BenchmarkModelSelection
-    ): FeatureGenerationSession {
-        validateCatalogSelectionForRun(selection)?.let { throw IllegalStateException(it) }
-        featureGenerationMutex.lock()
-        try {
-            if (cachedFeatureSelection != selection) {
-                onnxEngine.release()
-                cachedFeatureSession?.close()
-                cachedFeatureSession = null
-                cachedFeatureSelection = selection
-            }
-            val reusableLiteRtSession = if (selection.runtimeType == RuntimeType.LITERT) {
-                cachedFeatureSession?.also {
-                    Log.d("TEST_FLOW", "TEST_FLOW | Model session reused | ${selection.displayName}")
-                } ?: ((liteRtEngine as? LiteRtLlmEngine)?.openSession(selection.modelPath)
-                    ?: throw IllegalStateException("LiteRT engine is not initialized.")).also {
-                    cachedFeatureSession = it
-                    cachedFeatureSelection = selection
-                }
-            } else {
-                null
-            }
-            val closed = AtomicBoolean(false)
-            return object : FeatureGenerationSession {
-                override suspend fun generate(prompt: String, maxTokens: Int, onText: (String) -> Unit): String {
-                    check(!closed.get()) { "Feature generation session is already closed." }
-                    val generateRequest: suspend (BenchmarkPrompt, StreamCallback) -> Unit =
-                        reusableLiteRtSession?.let { session -> session::generate }
-                            ?: resolveEngineForRun(selection)::generate
-                    return generateFeatureText(
-                        selection = selection,
-                        prompt = prompt,
-                        maxTokens = maxTokens,
-                        generateRequest = generateRequest,
-                        onText = onText
-                    )
-                }
-
-                override suspend fun close() {
-                    if (!closed.compareAndSet(false, true)) return
-                    // Release the request lease; keep the model warm for the next question.
-                    featureGenerationMutex.unlock()
-                }
-            }
-        } catch (error: Throwable) {
-            featureGenerationMutex.unlock()
-            throw error
-        }
-    }
-
-    private suspend fun generateFeatureText(
-        selection: BenchmarkModelSelection,
-        prompt: String,
-        maxTokens: Int,
-        generateRequest: suspend (BenchmarkPrompt, StreamCallback) -> Unit,
-        onText: (String) -> Unit = {}
-    ): String {
-        val output = StringBuffer()
-        val startedAt = android.os.SystemClock.elapsedRealtime()
-        Log.d("TEST_FLOW", "TEST_FLOW | Generation started | model=${selection.displayName} | runtime=${selection.runtimeType} | promptChars=${prompt.length} | maxTokens=$maxTokens")
-        var generationError: Throwable? = null
-        val request = BenchmarkPrompt(
-                modelId = selection.modelId,
-                modelName = selection.displayName,
-                modelFilePath = selection.modelPath,
-                tokenizerFilePath = selection.tokenizerPath,
-                modelDisplayName = selection.displayName,
-                runtimeType = selection.runtimeType,
-                engineType = selection.engineType,
-                promptTemplateType = selection.promptTemplateType,
-                selectionSource = SelectionSource.CATALOG,
-                prompt = prompt,
-                maxTokens = maxTokens.coerceIn(MIN_MAX_TOKENS, MAX_MAX_TOKENS)
-            )
-        val callback = object : StreamCallback {
-                override fun onFirstToken() {
-                    Log.d("TEST_FLOW", "TEST_FLOW | First text | elapsedMs=${android.os.SystemClock.elapsedRealtime() - startedAt}")
-                }
-
-                override fun onToken(token: String) {
-                    output.append(token)
-                    onText(output.toString())
-                }
-
-                override fun onComplete() = Unit
-
-                override fun onError(throwable: Throwable) {
-                    generationError = throwable
-                }
-            }
-        generateRequest(request, callback)
-        generationError?.let { throw it }
-        return output.toString().trim().takeIf { it.isNotEmpty() }
-            ?: throw IllegalStateException("Local model boş yanıt üretti.")
-    }
-
     fun updateDraftResponseQuality(quality: ResponseQuality) {
         _uiState.update { it.copy(draftResponseQuality = quality) }
     }
@@ -685,63 +503,6 @@ class BenchmarkViewModel : ViewModel() {
         }
     }
 
-    private fun resolveEngineForRun(selection: BenchmarkModelSelection?): LocalLlmEngine {
-        return if (selection == null) {
-            selectedEngine
-        } else {
-            engineFactory.create(
-                engineType = selection.engineType,
-                runtimeType = selection.runtimeType
-            )
-        }
-    }
-
-    private fun validateCatalogSelectionForRun(selection: BenchmarkModelSelection): String? {
-        return when (selection.engineType) {
-            com.hilal.llm.catalog.EngineType.EXECUTORCH_GENERATE -> {
-                val hasPte = selection.modelPath.trim().endsWith(".pte", ignoreCase = true)
-                val hasTokenizer = !selection.tokenizerPath.isNullOrBlank()
-                when {
-                    !hasPte -> "Selected ExecuTorch model must be a .pte file."
-                    !hasTokenizer -> "Selected ExecuTorch model requires a tokenizer file."
-                    else -> null
-                }
-            }
-            com.hilal.llm.catalog.EngineType.EXECUTORCH_FORWARD ->
-                "This ExecuTorch model is forward-only and requires a custom forward runner."
-
-            com.hilal.llm.catalog.EngineType.LITERT_LM -> {
-                val normalized = selection.modelPath.trim().lowercase()
-                val supported = normalized.endsWith(".litertlm") ||
-                    normalized.endsWith(".task") ||
-                    normalized.endsWith(".tflite") ||
-                    normalized.endsWith(".zip") ||
-                    normalized.endsWith(".bundle")
-                if (supported) null else "Selected LiteRT model format is not supported by current LiteRT runner."
-            }
-
-            com.hilal.llm.catalog.EngineType.ONNX_GENAI -> {
-                if (selection.modelPath.endsWith("genai_config.json")) null
-                else "ONNX requires a complete GenAI model package from the catalog."
-            }
-            com.hilal.llm.catalog.EngineType.LLAMA_CPP -> {
-                if (selection.modelPath.trim().endsWith(".gguf", ignoreCase = true)) {
-                    null
-                } else {
-                    "Selected llama.cpp model must be a .gguf file."
-                }
-            }
-        }
-    }
-
-    private fun refreshEngineFactory() {
-        engineFactory = LocalLlmEngineFactory(
-            execuTorchEngine = execuTorchEngine,
-            liteRtEngine = liteRtEngine,
-            llamaCppEngine = llamaEngine,
-            onnxEngine = onnxEngine,
-            manualFallbackEngine = selectedEngine
-        )
-    }
-
+    private fun resolveEngineForRun(selection: BenchmarkModelSelection?): LocalLlmEngine =
+        runtime.benchmarkEngine(selection, _uiState.value.selectedEngineType)
 }

@@ -4,7 +4,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.hilal.llm.benchmark.FeatureGenerationSession
+import com.hilal.llm.inference.FeatureGenerationSession
 import com.hilal.llm.catalog.BenchmarkModelSelection
 import com.hilal.llm.catalog.RuntimeType
 import com.hilal.llm.test.network.JevClassifier

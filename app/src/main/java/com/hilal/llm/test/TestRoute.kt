@@ -4,30 +4,36 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.hilal.llm.benchmark.BenchmarkViewModel
+import com.hilal.llm.benchmark.BenchmarkUiState
+import com.hilal.llm.benchmark.EngineType
+import com.hilal.llm.catalog.BenchmarkModelSelection
+import com.hilal.llm.inference.FeatureGenerationSession
 
 @Composable
 fun TestRoute(
     testViewModel: TestViewModel,
-    benchmarkViewModel: BenchmarkViewModel,
+    benchmarkState: BenchmarkUiState,
+    onRuntimeSelected: (EngineType) -> Unit,
+    onModelSelected: (String) -> Unit,
+    onCancelDownload: () -> Unit,
+    openSession: suspend (BenchmarkModelSelection) -> FeatureGenerationSession,
     modifier: Modifier = Modifier
 ) {
     val testState by testViewModel.uiState.collectAsStateWithLifecycle()
-    val benchmarkState by benchmarkViewModel.uiState.collectAsStateWithLifecycle()
 
     TestScreen(
         testState = testState,
         benchmarkState = benchmarkState,
         onQuestionChanged = testViewModel::updateQuestion,
         onClassificationProviderSelected = testViewModel::selectClassificationProvider,
-        onRuntimeSelected = benchmarkViewModel::setEngine,
-        onModelSelected = benchmarkViewModel::selectCatalogModel,
-        onCancelDownload = benchmarkViewModel::cancelModelDownload,
+        onRuntimeSelected = onRuntimeSelected,
+        onModelSelected = onModelSelected,
+        onCancelDownload = onCancelDownload,
         onSubmit = { jevApiKey ->
             testViewModel.submit(
                 selection = benchmarkState.selectedCatalogModel,
                 jevApiKey = jevApiKey,
-                openSession = benchmarkViewModel::openFeatureGenerationSession
+                openSession = openSession
             )
         },
         modifier = modifier
