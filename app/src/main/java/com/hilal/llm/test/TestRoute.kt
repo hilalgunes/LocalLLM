@@ -4,7 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.hilal.llm.benchmark.BenchmarkUiState
+import com.hilal.llm.catalog.ui.GenerationModelUiState
 import com.hilal.llm.benchmark.EngineType
 import com.hilal.llm.catalog.BenchmarkModelSelection
 import com.hilal.llm.inference.FeatureGenerationSession
@@ -12,7 +12,7 @@ import com.hilal.llm.inference.FeatureGenerationSession
 @Composable
 fun TestRoute(
     testViewModel: TestViewModel,
-    benchmarkState: BenchmarkUiState,
+    modelState: GenerationModelUiState,
     onRuntimeSelected: (EngineType) -> Unit,
     onModelSelected: (String) -> Unit,
     onCancelDownload: () -> Unit,
@@ -23,7 +23,7 @@ fun TestRoute(
 
     TestScreen(
         testState = testState,
-        benchmarkState = benchmarkState,
+        modelState = modelState,
         onQuestionChanged = testViewModel::updateQuestion,
         onClassificationProviderSelected = testViewModel::selectClassificationProvider,
         onRuntimeSelected = onRuntimeSelected,
@@ -31,7 +31,7 @@ fun TestRoute(
         onCancelDownload = onCancelDownload,
         onSubmit = { jevApiKey ->
             testViewModel.submit(
-                selection = benchmarkState.selectedCatalogModel,
+                selection = modelState.selectedCatalogModel,
                 jevApiKey = jevApiKey,
                 openSession = openSession
             )

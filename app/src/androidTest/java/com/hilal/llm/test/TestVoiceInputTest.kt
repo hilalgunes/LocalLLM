@@ -18,7 +18,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.core.app.ActivityOptionsCompat
 import com.hilal.llm.MainActivity
-import com.hilal.llm.benchmark.BenchmarkUiState
+import com.hilal.llm.catalog.ui.GenerationModelUiState
 import com.hilal.llm.catalog.BenchmarkModelSelection
 import com.hilal.llm.catalog.EngineType
 import com.hilal.llm.catalog.PromptTemplateType
@@ -49,7 +49,7 @@ class TestVoiceInputTest {
                 CompositionLocalProvider(LocalActivityResultRegistryOwner provides owner) {
                     TestScreen(
                         testState = TestUiState(),
-                        benchmarkState = BenchmarkUiState(selectedCatalogModel = BenchmarkModelSelection(
+                        modelState = GenerationModelUiState(selectedCatalogModel = BenchmarkModelSelection(
                             "test", "Test model", RuntimeType.LLAMA_CPP, EngineType.LLAMA_CPP,
                             PromptTemplateType.GENERIC, "/unused", null)),
                         onQuestionChanged = { question = it },

@@ -2,6 +2,7 @@ package com.hilal.llm.navigation
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CompareArrows
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Hub
@@ -23,6 +24,7 @@ enum class MainDestination(
     val label: String,
     val icon: ImageVector
 ) {
+    CHAT("chat", "Sohbet", Icons.AutoMirrored.Filled.Chat),
     RUN("run", "Run", Icons.Default.PlayArrow),
     COMPARE("compare", "Compare", Icons.AutoMirrored.Filled.CompareArrows),
     EMBEDDING("embedding", "Embedding", Icons.Default.Hub),

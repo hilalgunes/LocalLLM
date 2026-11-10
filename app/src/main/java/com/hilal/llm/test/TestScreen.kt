@@ -48,7 +48,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.hilal.llm.benchmark.BenchmarkUiState
+import com.hilal.llm.catalog.ui.GenerationModelUiState
 import com.hilal.llm.benchmark.EngineType
 import com.hilal.llm.benchmark.productionEngineTypes
 import com.hilal.llm.catalog.ModelConfig
@@ -59,7 +59,7 @@ import com.hilal.llm.catalog.download.DownloadState
 @Composable
 fun TestScreen(
     testState: TestUiState,
-    benchmarkState: BenchmarkUiState,
+    modelState: GenerationModelUiState,
     onQuestionChanged: (String) -> Unit,
     onClassificationProviderSelected: (ClassificationProvider) -> Unit,
     onRuntimeSelected: (EngineType) -> Unit,
@@ -85,7 +85,7 @@ fun TestScreen(
             } else voiceError = "Konuşma anlaşılamadı. Tekrar deneyin."
         }
     }
-    val selectedModel = benchmarkState.selectedCatalogModel
+    val selectedModel = modelState.selectedCatalogModel
 
     Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
         LazyColumn(
@@ -134,16 +134,16 @@ fun TestScreen(
                     ) {
                         Text("Local model", style = MaterialTheme.typography.titleMedium)
                         TestRuntimeDropdown(
-                            selectedEngine = benchmarkState.selectedEngineType,
+                            selectedEngine = modelState.selectedEngineType,
                             onRuntimeSelected = onRuntimeSelected
                         )
                         TestModelDropdown(
-                            benchmarkState = benchmarkState,
+                            modelState = modelState,
                             onModelSelected = onModelSelected
                         )
-                        benchmarkState.activeDownloadModelId?.let { modelId ->
-                            val model = benchmarkState.availableModels.firstOrNull { it.id == modelId }
-                            val state = benchmarkState.modelDownloadStates[modelId]
+                        modelState.activeDownloadModelId?.let { modelId ->
+                            val model = modelState.availableModels.firstOrNull { it.id == modelId }
+                            val state = modelState.modelDownloadStates[modelId]
                             Text("İndiriliyor: ${model?.displayName ?: modelId}${downloadProgress(state)}")
                             TextButton(onClick = onCancelDownload) { Text("İndirmeyi iptal et") }
                         }
@@ -226,6 +226,9 @@ fun TestScreen(
 
             if (selectedModel == null) {
                 item { Text("Önce bir local generation modeli seçin.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+            modelState.errorMessage?.let { message ->
+                item { Text(message, color = MaterialTheme.colorScheme.error) }
             }
             testState.errorMessage?.let { message ->
                 item { Text(message, color = MaterialTheme.colorScheme.error) }
@@ -338,20 +341,20 @@ private fun TestRuntimeDropdown(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TestModelDropdown(
-    benchmarkState: BenchmarkUiState,
+    modelState: GenerationModelUiState,
     onModelSelected: (String) -> Unit
 ) {
-    val runtime = runtimeFor(benchmarkState.selectedEngineType)
+    val runtime = runtimeFor(modelState.selectedEngineType)
     var expanded by remember(runtime) { mutableStateOf(false) }
-    val models = remember(benchmarkState.availableModels, runtime) {
-        benchmarkState.availableModels.filter { it.runtimeType == runtime }
+    val models = remember(modelState.availableModels, runtime) {
+        modelState.availableModels.filter { it.runtimeType == runtime }
     }
     ExposedDropdownMenuBox(
         expanded = expanded,
         onExpandedChange = { expanded = it }
     ) {
         OutlinedTextField(
-            value = benchmarkState.selectedCatalogModel?.displayName ?: "Model seç",
+            value = modelState.selectedCatalogModel?.displayName ?: "Model seç",
             onValueChange = {},
             readOnly = true,
             label = { Text("Local model") },
@@ -371,7 +374,7 @@ private fun TestModelDropdown(
                 )
             }
             models.forEach { model ->
-                val state = benchmarkState.modelDownloadStates[model.id] ?: DownloadState.Idle
+                val state = modelState.modelDownloadStates[model.id] ?: DownloadState.Idle
                 DropdownMenuItem(
                     text = {
                         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {

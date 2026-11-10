@@ -83,6 +83,10 @@ import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 
 class MainActivity : ComponentActivity() {
     private val runtimeOwner: com.hilal.llm.inference.ModelRuntimeViewModel by viewModels()
+    private val generationModels: com.hilal.llm.catalog.ui.GenerationModelViewModel by viewModels()
+    private val chatViewModel: com.hilal.llm.chat.ChatViewModel by viewModels {
+        com.hilal.llm.chat.ChatViewModel.Factory(filesDir, runtimeOwner.runtime.sessions)
+    }
     private val viewModel: BenchmarkViewModel by viewModels()
     private val ragViewModel: RagViewModel by viewModels()
     private val embeddingComparisonViewModel: RagComparisonViewModel by viewModels()
@@ -145,6 +149,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             LLMTheme {
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+                val generationModelState by generationModels.uiState.collectAsStateWithLifecycle()
                 val navController = rememberNavController()
                 val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
                 Scaffold(
@@ -155,9 +160,12 @@ class MainActivity : ComponentActivity() {
                 ) { innerPadding ->
                     NavHost(
                         navController = navController,
-                        startDestination = MainDestination.RUN.route,
+                        startDestination = MainDestination.CHAT.route,
                         modifier = Modifier.padding(innerPadding).consumeWindowInsets(innerPadding)
                     ) {
+                        composable(MainDestination.CHAT.route) {
+                            com.hilal.llm.chat.ChatRoute(chatViewModel, generationModels)
+                        }
                         composable(MainDestination.RUN.route) {
                             RunScreen(
                                 uiState = uiState,
@@ -191,10 +199,10 @@ class MainActivity : ComponentActivity() {
                         composable(MainDestination.TEST.route) {
                             TestRoute(
                                 testViewModel = testViewModel,
-                                benchmarkState = uiState,
-                                onRuntimeSelected = viewModel::setEngine,
-                                onModelSelected = viewModel::selectCatalogModel,
-                                onCancelDownload = viewModel::cancelModelDownload,
+                                modelState = generationModelState,
+                                onRuntimeSelected = generationModels::setEngine,
+                                onModelSelected = { generationModels.selectModel(it) },
+                                onCancelDownload = generationModels::cancelDownload,
                                 openSession = runtimeOwner.runtime.sessions::openSession
                             )
                         }
