@@ -164,7 +164,11 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.padding(innerPadding).consumeWindowInsets(innerPadding)
                     ) {
                         composable(MainDestination.CHAT.route) {
-                            com.hilal.llm.chat.ChatRoute(chatViewModel, generationModels)
+                            com.hilal.llm.chat.ChatRoute(chatViewModel, generationModels) {
+                                val rag = ragViewModel.uiState.value
+                                !viewModel.uiState.value.isRunning && !testViewModel.uiState.value.isRunning &&
+                                    !rag.isIndexingDocument && !rag.isGenerating && rag.pendingDownloadModelId == null
+                            }
                         }
                         composable(MainDestination.RUN.route) {
                             RunScreen(

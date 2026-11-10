@@ -35,6 +35,10 @@ class ChatScreenTest {
             LLMTheme { ChatRoute(owner, models) }
         }
         compose.onNodeWithText("Kayıtlı cevap").assertIsDisplayed()
+        compose.onNodeWithText("Model seç").performClick()
+        compose.onNodeWithText("Sohbet modelleri").assertIsDisplayed()
+        compose.onNodeWithText("Boş alan:", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Kapat").performClick()
         compose.onNodeWithText("Geçmiş").performClick()
         compose.onNodeWithText("Adlandır").performClick()
         compose.onAllNodes(hasSetTextAction()).filter(hasText("İlk konuşma")).onFirst().performTextReplacement("Yeni ad")

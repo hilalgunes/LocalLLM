@@ -6,10 +6,12 @@ import com.hilal.llm.catalog.ModelFileConfig
 import java.io.File
 
 class ModelStorageResolver(
-    private val context: Context
+    private val filesDir: File
 ) {
+    constructor(context: Context) : this(context.filesDir)
+
     fun getModelDir(config: ModelConfig): File {
-        val modelsDir = File(context.filesDir, MODELS_DIR_NAME)
+        val modelsDir = File(filesDir, MODELS_DIR_NAME)
         val runtimeDir = File(modelsDir, config.runtimeType.name.lowercase())
         val modelDir = File(runtimeDir, config.id)
         migrateLegacyModelDirIfNeeded(config, modelDir)
@@ -33,9 +35,8 @@ class ModelStorageResolver(
 
     fun isModelDownloaded(config: ModelConfig): Boolean {
         val modelDir = getModelDir(config)
-        return config.files
-            .filter { it.required }
-            .all { fileConfig ->
+        val required = config.files.filter { it.required }
+        return required.isNotEmpty() && required.all { fileConfig ->
                 val localFile = File(modelDir, fileConfig.fileName)
                 localFile.exists() &&
                     localFile.isFile &&
@@ -43,6 +44,9 @@ class ModelStorageResolver(
                     fileConfig.minBytes?.let { localFile.length() >= it } != false
             }
     }
+
+    fun storedBytes(config: ModelConfig): Long = getModelDir(config).walkTopDown()
+        .filter { it.isFile }.sumOf { it.length() }
 
     fun deleteModel(config: ModelConfig): Boolean {
         val modelDir = getModelDir(config)
@@ -54,7 +58,7 @@ class ModelStorageResolver(
 
     private fun migrateLegacyModelDirIfNeeded(config: ModelConfig, modelDir: File) {
         if (modelDir.exists()) return
-        val legacyDir = File(File(context.filesDir, MODELS_DIR_NAME), config.id)
+        val legacyDir = File(File(filesDir, MODELS_DIR_NAME), config.id)
         if (!legacyDir.exists()) return
 
         modelDir.parentFile?.mkdirs()

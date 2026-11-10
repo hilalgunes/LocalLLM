@@ -33,7 +33,7 @@ data class ModelConfig(
         }
 
     val hasDownloadArtifacts: Boolean
-        get() = files.filter { it.required }.all { file ->
+        get() = files.any { it.required } && files.filter { it.required }.all { file ->
             file.url.isNotBlank() && !file.url.isPlaceholderDownloadUrl()
         }
 }

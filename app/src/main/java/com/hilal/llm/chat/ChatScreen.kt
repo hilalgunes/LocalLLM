@@ -16,12 +16,13 @@ import com.hilal.llm.catalog.ui.GenerationModelViewModel
 import com.hilal.llm.catalog.download.DownloadState
 
 @Composable
-fun ChatRoute(owner: ChatViewModel, models: GenerationModelViewModel) {
+fun ChatRoute(owner: ChatViewModel, models: GenerationModelViewModel, canManageModels: () -> Boolean = { true }) {
     val chat = owner.chat
     val state by chat.uiState.collectAsStateWithLifecycle()
     val modelState by models.uiState.collectAsStateWithLifecycle()
     val thread = state.activeThread
     var showModels by remember { mutableStateOf(false) }
+    var modelToDelete by remember { mutableStateOf<com.hilal.llm.catalog.ModelConfig?>(null) }
     var showHistory by remember { mutableStateOf(false) }
     var rename by remember { mutableStateOf<ChatThread?>(null) }
     var renameText by remember { mutableStateOf("") }
@@ -42,14 +43,14 @@ fun ChatRoute(owner: ChatViewModel, models: GenerationModelViewModel) {
             TextButton(onClick = chat::newThread, enabled = !state.running && !state.loading) { Text("Yeni") }
         }
         Text(thread?.title ?: "Sohbetler yükleniyor…", style = MaterialTheme.typography.titleSmall)
-        OutlinedButton(onClick = { showModels = true }, enabled = !state.running && !state.loading, modifier = Modifier.fillMaxWidth()) {
+        OutlinedButton(onClick = { models.refresh(); showModels = true }, enabled = !state.running && !state.loading, modifier = Modifier.fillMaxWidth()) {
             Text(modelState.availableModels.firstOrNull { it.id == thread?.modelId }?.displayName ?: "Model seç")
         }
         modelState.activeDownloadModelId?.let { id ->
             val progress = modelState.modelDownloadStates[id] as? DownloadState.Downloading
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(progress?.progressLabel ?: "Model hazırlanıyor…", Modifier.weight(1f))
-                TextButton(onClick = models::cancelDownload) { Text("İptal") }
+                TextButton(onClick = models::cancelDownload, enabled = !modelState.isCancelling) { Text(if (modelState.isCancelling) "İptal ediliyor…" else "İptal") }
             }
         }
         (state.storageError ?: state.error ?: modelState.errorMessage)?.let {
@@ -95,27 +96,63 @@ fun ChatRoute(owner: ChatViewModel, models: GenerationModelViewModel) {
         }
     }
     if (showModels) AlertDialog(
-        onDismissRequest = { showModels = false }, title = { Text("Sohbet modeli") },
+        onDismissRequest = { if (modelState.deletingModelId == null) showModels = false }, title = { Text("Sohbet modelleri") },
         text = {
-            LazyColumn(Modifier.heightIn(max = 420.dp)) {
-                items(modelState.availableModels, key = { it.id }) { model ->
-                    TextButton(enabled = model.isEnabled && model.hasDownloadArtifacts, onClick = {
-                        val selectedThread = thread?.id
-                        showModels = false
-                        models.selectModel(model.id) { selection ->
-                            if (chat.uiState.value.activeThread?.id == selectedThread) chat.selectModel(selection.modelId)
-                        }
-                    }) {
-                        Column(Modifier.fillMaxWidth()) {
-                            Text(model.displayName)
-                            Text("${model.runtimeType} · ${model.estimatedSize}", style = MaterialTheme.typography.bodySmall)
-                            Text(if (!model.isEnabled) model.disabledReason ?: "Kullanılamıyor" else if (modelState.modelDownloadStates[model.id] is DownloadState.Success) "Kullan" else "İndir ve kullan", style = MaterialTheme.typography.labelSmall)
+            Column {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                Text("Boş alan: ${android.text.format.Formatter.formatFileSize(context, modelState.freeBytes)}", style = MaterialTheme.typography.bodySmall)
+                Text("Modeller metin üretir. Cihazda çalışabilmesi kullanılabilir belleğe de bağlıdır.", style = MaterialTheme.typography.bodySmall)
+                LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                    items(modelState.availableModels, key = { it.id }) { model ->
+                        val status = modelState.modelDownloadStates[model.id]
+                        val busy = modelState.activeDownloadModelId != null || modelState.deletingModelId != null
+                        Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                            Text(model.displayName, style = MaterialTheme.typography.titleSmall)
+                            Text("Sohbet · ${model.formatLabel} · Tahmini ${model.estimatedSize}", style = MaterialTheme.typography.bodySmall)
+                            Text("Diskte: ${android.text.format.Formatter.formatFileSize(context, modelState.storedBytes[model.id] ?: 0)}", style = MaterialTheme.typography.bodySmall)
+                            Text(when {
+                                modelState.deletingModelId == model.id -> "Siliniyor…"
+                                modelState.activeDownloadModelId == model.id && modelState.isCancelling -> "İptal ediliyor…"
+                                status is DownloadState.Downloading -> status.progressLabel
+                                status is DownloadState.Failed -> status.message
+                                !model.isEnabled -> model.disabledReason ?: "Kullanılamıyor"
+                                status is DownloadState.Success -> if (modelReady?.modelId == model.id) "Seçili · Dosyalar hazır" else "Dosyalar hazır"
+                                (modelState.storedBytes[model.id] ?: 0) > 0 -> "İndirme tamamlanmadı"
+                                else -> "İndirilmedi"
+                            }, style = MaterialTheme.typography.labelSmall)
+                            Row {
+                                TextButton(enabled = !busy && model.isEnabled && model.hasDownloadArtifacts, onClick = {
+                                    val selectedThread = thread?.id
+                                    models.selectModel(model.id) { selection ->
+                                        if (chat.uiState.value.activeThread?.id == selectedThread) chat.selectModel(selection.modelId)
+                                    }
+                                }) { Text(if (status is DownloadState.Success) "Kullan" else if (status is DownloadState.Failed) "Tekrar dene" else "İndir ve kullan") }
+                                if (modelState.activeDownloadModelId == model.id) {
+                                    TextButton(onClick = models::cancelDownload, enabled = !modelState.isCancelling) { Text("İptal") }
+                                } else if ((modelState.storedBytes[model.id] ?: 0) > 0) {
+                                    TextButton(onClick = { modelToDelete = model }, enabled = !busy) { Text("Sil") }
+                                }
+                            }
+                            HorizontalDivider()
                         }
                     }
                 }
+                modelState.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
-        }, confirmButton = { TextButton(onClick = { showModels = false }) { Text("Kapat") } }
+        }, confirmButton = { TextButton(onClick = { showModels = false }, enabled = modelState.deletingModelId == null) { Text("Kapat") } }
     )
+    modelToDelete?.let { model -> AlertDialog(
+        onDismissRequest = { modelToDelete = null }, title = { Text("Model dosyaları silinsin mi?") },
+        text = { Text("${model.displayName} dosyaları silinecek. Sohbet geçmişi korunur; modeli tekrar indirebilirsin.") },
+        confirmButton = { TextButton(onClick = {
+            modelToDelete = null
+            models.deleteModel(model.id) { block ->
+                check(canManageModels() && !chat.uiState.value.running) { "Başka bir model işlemi devam ediyor. Tamamlanmasını bekleyin." }
+                owner.withReleasedRuntime(block)
+            }
+        }) { Text("Sil") } },
+        dismissButton = { TextButton(onClick = { modelToDelete = null }) { Text("Vazgeç") } }
+    ) }
     if (showHistory) AlertDialog(
         onDismissRequest = { showHistory = false }, title = { Text("Sohbet geçmişi") },
         text = { LazyColumn(Modifier.heightIn(max = 420.dp)) {

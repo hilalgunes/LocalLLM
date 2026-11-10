@@ -17,6 +17,10 @@ data class GenerationModelUiState(
     val selectedCatalogModel: BenchmarkModelSelection? = null,
     val modelDownloadStates: Map<String, DownloadState> = emptyMap(),
     val activeDownloadModelId: String? = null,
+    val storedBytes: Map<String, Long> = emptyMap(),
+    val freeBytes: Long = 0,
+    val deletingModelId: String? = null,
+    val isCancelling: Boolean = false,
     val errorMessage: String? = null
 )
 
@@ -32,10 +36,40 @@ class GenerationModelViewModel(application: Application) : AndroidViewModel(appl
 
     init { refresh() }
     fun refresh() {
+        viewModelScope.launch { refreshStorage() }
+    }
+    private suspend fun refreshStorage() {
         val models = ModelCatalogRepository.getAvailableModels().filter { it.purpose == ModelPurpose.GENERATION }
-        state.update { it.copy(availableModels = models, modelDownloadStates = models.associate { model ->
-            model.id to if (downloads.isModelDownloaded(model)) DownloadState.Success else DownloadState.Idle
-        }) }
+        val inventory = withContext(Dispatchers.IO) {
+            models.associate { it.id to (downloads.isModelDownloaded(it) to storage.storedBytes(it)) }
+        }
+        state.update { current -> current.copy(availableModels = models,
+            selectedCatalogModel = current.selectedCatalogModel?.takeIf { inventory[it.modelId]?.first == true },
+            storedBytes = inventory.mapValues { it.value.second },
+            freeBytes = getApplication<Application>().filesDir.usableSpace,
+            modelDownloadStates = models.associate { model ->
+                model.id to if (current.activeDownloadModelId == model.id) current.modelDownloadStates[model.id] ?: DownloadState.Idle
+                else if (inventory[model.id]?.first == true) DownloadState.Success
+                else current.modelDownloadStates[model.id]?.takeIf { it is DownloadState.Failed } ?: DownloadState.Idle
+            }) }
+    }
+    fun deleteModel(id: String, withReleasedRuntime: suspend (suspend () -> Unit) -> Unit) {
+        if (state.value.activeDownloadModelId != null || state.value.deletingModelId != null) return
+        val model = ModelCatalogRepository.getModelById(id) ?: return
+        state.update { it.copy(deletingModelId = id, errorMessage = null) }
+        viewModelScope.launch {
+            try {
+                withReleasedRuntime {
+                    withContext(Dispatchers.IO) { check(storage.deleteModel(model)) { "Model dosyaları silinemedi." } }
+                }
+                state.update { it.copy(selectedCatalogModel = it.selectedCatalogModel?.takeUnless { selection -> selection.modelId == id }) }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { state.update { it.copy(errorMessage = error.message) } }
+            finally {
+                withContext(NonCancellable) { refreshStorage() }
+                state.update { it.copy(deletingModelId = null) }
+            }
+        }
     }
     fun setEngine(type: EngineType) {
         cancelDownload()
@@ -54,6 +88,7 @@ class GenerationModelViewModel(application: Application) : AndroidViewModel(appl
         }
     }
     fun selectModel(id: String, onSelected: (BenchmarkModelSelection) -> Unit = {}) {
+        if (state.value.activeDownloadModelId != null || state.value.deletingModelId != null) return
         val model = ModelCatalogRepository.getModelById(id) ?: return
         if (!model.isEnabled || !model.hasDownloadArtifacts || model.purpose != ModelPurpose.GENERATION) {
             state.update { it.copy(errorMessage = model.disabledReason ?: "Model kullanılamıyor.") }; return
@@ -69,20 +104,33 @@ class GenerationModelViewModel(application: Application) : AndroidViewModel(appl
                 ensureActive()
                 val selected = selection(model)
                 if (requestId == currentRequest) {
-                    state.update { it.copy(selectedCatalogModel = selected, activeDownloadModelId = null, modelDownloadStates = it.modelDownloadStates + (id to DownloadState.Success)) }
+                    state.update { it.copy(selectedCatalogModel = selected, modelDownloadStates = it.modelDownloadStates + (id to DownloadState.Success)) }
                     onSelected(selected)
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {
-                if (requestId == currentRequest) state.update { it.copy(activeDownloadModelId = null, errorMessage = error.message ?: "Model hazırlanamadı.", modelDownloadStates = it.modelDownloadStates + (id to DownloadState.Failed(error.message ?: "İndirme başarısız."))) }
+                if (requestId == currentRequest) state.update { it.copy(errorMessage = error.message ?: "Model hazırlanamadı.", modelDownloadStates = it.modelDownloadStates + (id to DownloadState.Failed(error.message ?: "İndirme başarısız."))) }
+            } finally {
+                withContext(NonCancellable) { refreshStorage() }
+                if (requestId == currentRequest) state.update { it.copy(activeDownloadModelId = null, isCancelling = false) }
             }
         }
     }
     fun cancelDownload() {
-        requestId++
-        download?.cancel()
-        download = null
-        state.update { current -> current.copy(activeDownloadModelId = null, modelDownloadStates = current.activeDownloadModelId?.let { current.modelDownloadStates + (it to DownloadState.Idle) } ?: current.modelDownloadStates) }
+        val job = download ?: return
+        if (!job.isActive) return
+        val id = state.value.activeDownloadModelId
+        state.update { it.copy(isCancelling = true) }
+        job.cancel()
+        viewModelScope.launch {
+            job.join()
+            if (download === job) {
+                download = null
+                state.update { it.copy(activeDownloadModelId = null, isCancelling = false,
+                    modelDownloadStates = if (id == null) it.modelDownloadStates else it.modelDownloadStates + (id to DownloadState.Idle)) }
+                refreshStorage()
+            }
+        }
     }
     private fun selection(model: ModelConfig): BenchmarkModelSelection {
         val files = mapper.toRunFiles(model)
