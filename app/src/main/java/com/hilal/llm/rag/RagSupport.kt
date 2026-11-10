@@ -1,15 +1,9 @@
 package com.hilal.llm.rag
 
-import android.content.ContentResolver
-import android.net.Uri
-import com.tom_roush.pdfbox.pdmodel.PDDocument
-import com.tom_roush.pdfbox.text.PDFTextStripper
 import kotlin.math.sqrt
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.UUID
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 private val tokenizerRegex = Regex("[^\\p{L}\\p{N}]+")
 private val stopWords = setOf(
@@ -76,69 +70,6 @@ internal object RagVectorEncoder {
             vector[i] /= magnitude
         }
     }
-}
-
-suspend fun readDocumentText(
-    contentResolver: ContentResolver,
-    uri: Uri,
-    displayName: String
-): String = withContext(Dispatchers.IO) {
-    val normalizedName = displayName.lowercase()
-    val isPdf = normalizedName.endsWith(".pdf") ||
-        (contentResolver.getType(uri)?.equals("application/pdf", ignoreCase = true) == true)
-
-    if (isPdf) {
-        contentResolver.openInputStream(uri)?.use { input ->
-            PDDocument.load(input).use { document ->
-                PDFTextStripper().getText(document).trim()
-            }
-        } ?: throw IllegalStateException("Unable to read PDF document: $displayName")
-    } else {
-        contentResolver.openInputStream(uri)?.use { input ->
-            input.bufferedReader(Charsets.UTF_8).use { reader -> reader.readText().trim() }
-        } ?: throw IllegalStateException("Unable to read text document: $displayName")
-    }
-}
-
-fun buildChunksFromDocument(
-    documentId: String,
-    displayName: String,
-    text: String,
-    chunkSize: Int = 900,
-    overlap: Int = 150
-): List<RagChunk> {
-    val chunks = chunkText(text, chunkSize = chunkSize, overlap = overlap)
-    return chunks.mapIndexed { index, chunk ->
-        RagChunk(
-            documentId = documentId,
-            documentName = displayName,
-            chunkIndex = index,
-            text = chunk
-        )
-    }
-}
-
-fun chunkText(
-    text: String,
-    chunkSize: Int = 900,
-    overlap: Int = 150
-): List<String> {
-    val normalized = text.replace("\r\n", "\n").trim()
-    if (normalized.isBlank()) return emptyList()
-    if (normalized.length <= chunkSize) return listOf(normalized)
-
-    val chunks = mutableListOf<String>()
-    var start = 0
-    while (start < normalized.length) {
-        val end = (start + chunkSize).coerceAtMost(normalized.length)
-        val chunk = normalized.substring(start, end).trim()
-        if (chunk.isNotBlank()) {
-            chunks.add(chunk)
-        }
-        if (end >= normalized.length) break
-        start = (end - overlap).coerceAtLeast(start + 1)
-    }
-    return chunks
 }
 
 suspend fun rankChunks(

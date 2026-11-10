@@ -23,9 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 @Composable
 fun RagRoute(
@@ -64,9 +62,7 @@ fun RagRoute(
         val displayName = readDisplayName(contentResolver, uri) ?: "document"
         coroutineScope.launch {
             try {
-                val text = withContext(Dispatchers.IO) {
-                    readDocumentText(contentResolver, uri, displayName)
-                }
+                val text = RagDocumentReader.read(contentResolver, uri, displayName)
                 viewModel.addDocument(displayName = displayName, text = text)
             } catch (throwable: Throwable) {
                 viewModel.reportError(buildDocumentErrorMessage("Belge okunamadı", throwable, uri))
