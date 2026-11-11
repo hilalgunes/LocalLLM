@@ -22,7 +22,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.os.SystemClock
-import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 
 class RagViewModel(application: Application) : AndroidViewModel(application) {
     companion object {
@@ -39,20 +40,6 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
     private val downloadRepository = ModelDownloadRepository(storageResolver)
     private val runFileMapper = ModelRunFileMapper(storageResolver)
     private val vectorStoreRepository = RagVectorStoreRepository(appContext)
-    private data class ResolvedEmbeddingModel(
-        val modelId: String,
-        val displayName: String,
-        val runtimeType: RuntimeType,
-        val modelPath: String,
-        val tokenizerPath: String?
-    )
-
-    private data class ActiveEmbeddingProvider(
-        val modelId: String,
-        val runtimeType: RuntimeType,
-        val provider: RagEmbeddingProvider
-    )
-
     private var indexedEmbeddingModelId: String? = null
 
     private data class ChunkingConfig(
@@ -60,7 +47,7 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
         val overlap: Int
     )
 
-    private val embeddingProviderRef = AtomicReference<ActiveEmbeddingProvider?>(null)
+    private val embeddingService = RagEmbeddingSessionService(::createEmbeddingProvider)
 
     private var contentResolver: ContentResolver? = null
     private var answerGenerator: RagAnswerGenerator? = null
@@ -652,43 +639,21 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
                     "Model listede kalıyor ama bu runtime ile güvenli çalıştırılamıyor; farklı embedding runtime bağlanmalı."
             )
         }
-        return createEmbeddingProvider(embeddingModel).embed(
-            text = text,
-            embeddingModelPath = embeddingModel.modelPath,
-            tokenizerPath = embeddingModel.tokenizerPath,
-            purpose = purpose
-        )
+        return embeddingService.embed(text, embeddingModel, purpose)
     }
 
-    private fun createEmbeddingProvider(embeddingModel: ResolvedEmbeddingModel): RagEmbeddingProvider {
-        embeddingProviderRef.get()?.let { active ->
-            if (active.modelId == embeddingModel.modelId && active.runtimeType == embeddingModel.runtimeType) {
-                return active.provider
-            }
-        }
-
-        val provider = when (embeddingModel.runtimeType) {
+    private fun createEmbeddingProvider(embeddingModel: ResolvedEmbeddingModel): RagEmbeddingProvider =
+        when (embeddingModel.runtimeType) {
             RuntimeType.LLAMA_CPP -> {
-                val resolver = contentResolver ?: throw IllegalStateException("Embedding provider is not initialized.")
+                val resolver = contentResolver ?: error("Embedding provider is not initialized.")
                 LlamaCppRagEmbeddingProvider(resolver)
             }
             RuntimeType.LITERT -> if (embeddingModel.modelId.startsWith("embeddinggemma-2")) {
                 LiteRtEmbeddingGemmaRagEmbeddingProvider(appContext.cacheDir)
             } else LiteRtGeckoRagEmbeddingProvider()
-            RuntimeType.ONNX -> throw IllegalStateException("ONNX embedding provider is not configured.")
-            RuntimeType.EXECUTORCH -> throw IllegalStateException(
-                "${embeddingModel.displayName} için ExecuTorch embedding provider bağlı değil."
-            )
+            RuntimeType.ONNX -> error("ONNX embedding provider is not configured.")
+            RuntimeType.EXECUTORCH -> error("${embeddingModel.displayName} için ExecuTorch embedding provider bağlı değil.")
         }
-        val activeProvider = ActiveEmbeddingProvider(
-            modelId = embeddingModel.modelId,
-            runtimeType = embeddingModel.runtimeType,
-            provider = provider
-        )
-        val previous = embeddingProviderRef.getAndSet(activeProvider)
-        previous?.provider?.close()
-        return activeProvider.provider
-    }
 
     private fun resolveSelectedEmbeddingModel(currentModels: List<com.hilal.llm.catalog.ModelConfig>): ResolvedEmbeddingModel? {
         val selectedModelId = _uiState.value.selectedEmbeddingModelId ?: return null
@@ -715,7 +680,7 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
-        embeddingProviderRef.getAndSet(null)?.provider?.close()
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch { embeddingService.close() }
         vectorStoreRepository.close()
         super.onCleared()
     }
