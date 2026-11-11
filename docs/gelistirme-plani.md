@@ -51,7 +51,7 @@ Stash kayıtları yalnızca ilgili yerel depodadır; normal push ile gönderilme
 - [x] Belge okuyucu ve metin parçalama bileşenlerini ayır.
 - [ ] Embedding, vektör deposu ve cevap üretimi sınırlarını düzenle.
 - [x] Android RAG üretimini ortak runtime üzerinden çalıştır.
-- [ ] iOS ağır dosya/indeks işlerini ana aktörden ayır.
+- [x] iOS ağır dosya/indeks işlerini ana aktörden ayır.
 - [ ] Kaynak gösterimi ve belge/indeks yaşam döngüsünü eşitle.
 - [ ] Veri hacmine göre iOS vektör deposu kararını ölçümle ver.
 
@@ -125,3 +125,23 @@ iOS: derleme başarılı; iPhone 18 Pro / iOS 27 simülatöründe 20 test, 0 hat
 - Aktif üretim bitmeden ikinci oturum çalışmaz; aynı modelin sıcak backend oturumu yeniden kullanılır. Embedding sağlayıcısı bu adımda ayrı kalır.
 - İptal ve hata durumunda oturum bırakma beklenir. Erken dönüşlerde ekranın üretim durumu sıfırlanır; indeksleme sırasında soru başlatılmaz.
 - Doğrulama: debug derlemesi ve 53 birim testi başarılı. Yeni üç test ortak oturum sıralaması/yeniden kullanımını, iptal temizliğini ve hata iletimini doğrular. Gerçek modelle cihaz performansı ölçülmedi.
+
+## Adım 4.3 — iOS belge ve indeks servisi (12 Kasım 2026)
+
+- RAGDocumentStore actor dosya okuma, parçalama, kaynak kopyalama ve JSON indeks erişimini ana aktör dışında sıralar. Açılışta indeks yüklenene kadar belge işlemleri bekler.
+- Toplu import önce kaynakları hazırlar, atomik indeks yazımı başarılı olduktan sonra ekran güncellenir. Hata/iptalde yeni kaynak kopyaları temizlenir.
+- Embedding seçimi ve belge silme indeks kaydı başarılı olduktan sonra ekrana yansır. Silinen belgelere ait cevap/kaynak ve karşılaştırma state’i temizlenir.
+- Eski indeks formatı korunur. Kaynak dosyasının silinmesi başarısız olursa kaydedilmiş indeks korunur; artık dosyaların temizlenmesi ayrıca ele alınabilir.
+- Doğrulama: iOS simülatör derlemesi ve 28 test başarılı. Arka planda okuma, toplu import geri alma, disk yazma hatasında state koruma ve eski indeks yükleme/silme testleri eklendi.
+
+## Adım 4.4 — iOS belge kimliği (12 Kasım 2026)
+
+- Aynı isimle eklenen farklı kaynaklar ayrı kimliklerle listelenir ve silinir. Eski, kaynak kopyası olmayan indekslerin adla gruplama davranışı korunur.
+- Silme sonrası yalnızca ilgili kaynağın parçaları ve kopyası kaldırılır; açık kaynak seçimi temizlenir.
+- Doğrulama: iOS simülatöründe 29 test başarılı. Aynı isimli iki dosyanın bağımsız silinmesi ve uygulama yeniden açıldığında kalan kaynağın korunması test edildi.
+
+## Adım 4.5 — Android kalıcı vektör yaşam döngüsü (12 Kasım 2026)
+
+- SQLite snapshot artık kayıtlı embedding vektörlerini de geri yükler. Yeniden açılış sonrasında bellek içi arama ve mevcut belgelerin üzerine ekleme/silme vektörlerini kaybetmez.
+- İndeks yazımı IO dispatcher üzerinde yapılır. Eksik vektör veya native kayıt hatasında bellek durumu son kaydedilmiş snapshot’a döner.
+- Doğrulama: 53 JVM testi ve debug derlemesi başarılı. Pixel 10 Pro / Android 17 emülatöründe yeni kalıcı indeks testi geçti; yeniden açılış, aynı isimli iki belge, başarısız indeks güncellemesi, silme ve kalan belgeyle arama doğrulandı.

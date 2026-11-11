@@ -225,7 +225,17 @@ class RagVectorStoreRepository(context: Context) {
         return results
     }
 
-    private suspend fun persistCurrentState() {
+    private suspend fun persistCurrentState() = withContext(Dispatchers.IO) {
+        try {
+            writeCurrentState()
+        } catch (failure: Throwable) {
+            // Restore the last committed snapshot if validation or the native transaction fails.
+            try { loadSnapshotFromNative() } catch (reload: Throwable) { failure.addSuppressed(reload) }
+            throw failure
+        }
+    }
+
+    private fun writeCurrentState() {
         val docIds = documents.map { it.id }.toTypedArray()
         val docNames = documents.map { it.displayName }.toTypedArray()
         val docTexts = documents.map { it.text }.toTypedArray()
@@ -285,6 +295,17 @@ class RagVectorStoreRepository(context: Context) {
                 }
             }
         } ?: emptyList()
+
+        chunkEmbeddingsByKey = buildMap {
+            val array = parsed.optJSONArray("chunks") ?: JSONArray()
+            for (index in 0 until array.length()) {
+                val item = array.getJSONObject(index)
+                val vector = item.getJSONArray("embedding")
+                val chunk = RagChunk(item.getString("documentId"), item.getString("documentName"),
+                    item.getInt("chunkIndex"), item.getString("text"))
+                put(chunkEmbeddingKey(chunk), FloatArray(vector.length()) { vector.getDouble(it).toFloat() })
+            }
+        }
 
         chunks = parsed.optJSONArray("chunks")?.let { array ->
             buildList {

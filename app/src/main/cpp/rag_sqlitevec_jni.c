@@ -551,7 +551,7 @@ Java_com_hilal_llm_rag_RagVectorStoreNative_snapshotJson(JNIEnv *env, jobject th
         return NULL;
     }
     rc = sqlite3_prepare_v2(store->db,
-                            "SELECT document_id, document_name, chunk_index, text FROM rag_chunks ORDER BY document_name COLLATE NOCASE ASC, chunk_index ASC, rowid ASC;",
+                            "SELECT document_id, document_name, chunk_index, text, vec_to_json(embedding) FROM rag_chunks ORDER BY document_name COLLATE NOCASE ASC, chunk_index ASC, rowid ASC;",
                             -1, &chunkStmt, NULL);
     if (rc != SQLITE_OK) {
         sqlite3_finalize(docStmt);
@@ -584,6 +584,8 @@ Java_com_hilal_llm_rag_RagVectorStoreNative_snapshotJson(JNIEnv *env, jobject th
         json_append_escaped(json, sqlite3_column_text(chunkStmt, 1));
         sqlite3_str_appendf(json, ",\"chunkIndex\":%d,\"text\":", sqlite3_column_int(chunkStmt, 2));
         json_append_escaped(json, sqlite3_column_text(chunkStmt, 3));
+        sqlite3_str_appendall(json, ",\"embedding\":");
+        sqlite3_str_appendall(json, (const char *)sqlite3_column_text(chunkStmt, 4));
         sqlite3_str_appendall(json, "}");
     }
     sqlite3_str_appendall(json, "]}");
