@@ -143,7 +143,7 @@ class MainActivity : ComponentActivity() {
         viewModel.attachRuntime(runtimeOwner.runtime)
         viewModel.initializeBenchmarkHistoryRepository(applicationContext)
         viewModel.initializeModelCatalog(applicationContext)
-        ragViewModel.initializeEngines(contentResolver)
+        ragViewModel.initialize(contentResolver, runtimeOwner.runtime.sessions)
         ragViewModel.loadModels()
         enableEdgeToEdge()
         setContent {

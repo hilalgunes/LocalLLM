@@ -48,11 +48,12 @@ import com.hilal.llm.ui.theme.LLMTheme
 
 class RagActivity : ComponentActivity() {
     private val viewModel: RagViewModel by viewModels()
+    private val runtimeOwner: com.hilal.llm.inference.ModelRuntimeViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         PDFBoxResourceLoader.init(applicationContext)
-        viewModel.initializeEngines(contentResolver)
+        viewModel.initialize(contentResolver, runtimeOwner.runtime.sessions)
         viewModel.loadModels()
         enableEdgeToEdge()
 

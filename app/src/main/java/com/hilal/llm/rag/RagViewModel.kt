@@ -4,12 +4,6 @@ import android.app.Application
 import android.content.ContentResolver
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.hilal.llm.benchmark.BenchmarkPrompt
-import com.hilal.llm.benchmark.LocalLlmEngine
-import com.hilal.llm.benchmark.LocalLlmEngineFactory
-import com.hilal.llm.benchmark.SelectionSource
-import com.hilal.llm.benchmark.StreamCallback
-import com.hilal.llm.benchmark.UnsupportedRuntimeEngine
 import com.hilal.llm.catalog.BenchmarkModelSelection
 import com.hilal.llm.catalog.ModelCatalogRepository
 import com.hilal.llm.catalog.RuntimeType
@@ -17,6 +11,9 @@ import com.hilal.llm.catalog.download.DownloadState
 import com.hilal.llm.catalog.download.ModelDownloadRepository
 import com.hilal.llm.catalog.runtime.ModelRunFileMapper
 import com.hilal.llm.catalog.storage.ModelStorageResolver
+import com.hilal.llm.inference.ModelSessionService
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -65,28 +62,18 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
 
     private val embeddingProviderRef = AtomicReference<ActiveEmbeddingProvider?>(null)
 
-    private val unavailableEngine: LocalLlmEngine = UnsupportedRuntimeEngine(
-        "Seçilen LLM runtime hazır değil; sahte cevap üretilmedi."
-    )
-    private var llamaEngine: LocalLlmEngine? = null
-    private var liteRtEngine: LocalLlmEngine? = null
-    private var execuTorchEngine: LocalLlmEngine? = null
     private var contentResolver: ContentResolver? = null
-    private var engineFactory: LocalLlmEngineFactory = LocalLlmEngineFactory(
-        execuTorchEngine = execuTorchEngine,
-        liteRtEngine = liteRtEngine,
-        llamaCppEngine = llamaEngine,
-        manualFallbackEngine = unavailableEngine
-    )
+    private var answerGenerator: RagAnswerGenerator? = null
+    private var initialized = false
 
     private val _uiState = MutableStateFlow(RagUiState())
     val uiState: StateFlow<RagUiState> = _uiState.asStateFlow()
 
-    fun initializeEngines(contentResolver: ContentResolver) {
+    fun initialize(contentResolver: ContentResolver, sessions: ModelSessionService) {
         this.contentResolver = contentResolver
-        initializeLlamaEngine(contentResolver)
-        initializeLiteRtEngine(contentResolver)
-        initializeExecuTorchEngine(contentResolver)
+        answerGenerator = RagAnswerGenerator(sessions::openSession)
+        if (initialized) return
+        initialized = true
         viewModelScope.launch {
             try {
                 vectorStoreRepository.initializeFromPersistentStore()
@@ -423,7 +410,11 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
 
     fun askQuestion() {
         val current = _uiState.value
-        if (current.isGenerating) return
+        if (current.isGenerating || current.isIndexingDocument) return
+        val generator = answerGenerator ?: run {
+            _uiState.update { it.copy(errorMessage = "Model servisi hazır değil.") }
+            return
+        }
 
         val question = current.question.trim()
         if (question.isBlank()) {
@@ -457,7 +448,7 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        viewModelScope.launch {
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
             val requestStartedAt = SystemClock.elapsedRealtime()
             _uiState.update {
                 it.copy(
@@ -514,7 +505,6 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     buildRagPrompt(question, relevantChunks)
                 }
-                val engine = engineFactory.create(selection.engineType, selection.runtimeType)
 
                 _uiState.update {
                     it.copy(
@@ -532,60 +522,18 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
 
                 val generationStartedAt = SystemClock.elapsedRealtime()
 
-                engine.generate(
-                    BenchmarkPrompt(
-                        modelId = selection.modelId,
-                        modelName = selection.displayName,
-                        modelFilePath = selection.modelPath,
-                        tokenizerFilePath = selection.tokenizerPath,
-                        modelDisplayName = selection.displayName,
-                        runtimeType = selection.runtimeType,
-                        engineType = selection.engineType,
-                        promptTemplateType = selection.promptTemplateType,
-                        selectionSource = SelectionSource.CATALOG,
-                        prompt = prompt,
-                        maxTokens = DEFAULT_MAX_TOKENS
-                    ),
-                    object : StreamCallback {
-                        override fun onFirstToken() {
-                            val firstTokenLatency = SystemClock.elapsedRealtime() - generationStartedAt
-                            _uiState.update { currentState ->
-                                currentState.copy(
-                                    answerMetrics = currentState.answerMetrics?.copy(
-                                        firstTokenLatencyMs = firstTokenLatency
-                                    )
-                                )
-                            }
-                        }
-
-                        override fun onToken(token: String) {
-                            _uiState.update { currentState ->
-                                val rawAnswer = currentState.answer + token
-                                currentState.copy(answer = sanitizeRagOutput(rawAnswer))
-                            }
-                        }
-
-                        override fun onComplete() {
-                            val totalTimeMs = SystemClock.elapsedRealtime() - requestStartedAt
-                            _uiState.update { currentState ->
-                                currentState.copy(
-                                    isGenerating = false,
-                                    answerMetrics = currentState.answerMetrics?.copy(totalTimeMs = totalTimeMs)
-                                )
-                            }
-                        }
-
-                        override fun onError(throwable: Throwable) {
-                            _uiState.update {
-                                it.copy(
-                                    isGenerating = false,
-                                    answerMetrics = it.answerMetrics?.copy(totalTimeMs = SystemClock.elapsedRealtime() - requestStartedAt),
-                                    errorMessage = throwable.message ?: "Question answering failed."
-                                )
-                            }
-                        }
+                var firstTokenReceived = false
+                val result = generator.generate(selection, prompt, DEFAULT_MAX_TOKENS) { fullText ->
+                    if (fullText.isNotEmpty() && !firstTokenReceived) {
+                        firstTokenReceived = true
+                        val latency = SystemClock.elapsedRealtime() - generationStartedAt
+                        _uiState.update { it.copy(answerMetrics = it.answerMetrics?.copy(firstTokenLatencyMs = latency)) }
                     }
-                )
+                    _uiState.update { it.copy(answer = sanitizeRagOutput(fullText)) }
+                }
+                _uiState.update { it.copy(answer = sanitizeRagOutput(result)) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (throwable: Throwable) {
                 _uiState.update {
                     it.copy(
@@ -594,6 +542,9 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
                         errorMessage = throwable.message ?: "Question answering failed."
                     )
                 }
+            } finally {
+                _uiState.update { it.copy(isGenerating = false,
+                    answerMetrics = it.answerMetrics?.copy(totalTimeMs = SystemClock.elapsedRealtime() - requestStartedAt)) }
             }
         }
     }
@@ -761,39 +712,6 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
             RagVectorStoreBackend.SQLITE_VEC -> "sqlite-vec RAG"
             RagVectorStoreBackend.GRAPH_RAG -> "Graph RAG"
         }
-    }
-
-    private fun refreshEngineFactory() {
-        engineFactory = LocalLlmEngineFactory(
-            execuTorchEngine = execuTorchEngine,
-            liteRtEngine = liteRtEngine,
-            llamaCppEngine = llamaEngine,
-            manualFallbackEngine = unavailableEngine
-        )
-    }
-
-    private fun initializeLlamaEngine(contentResolver: ContentResolver) {
-        llamaEngine = com.hilal.llm.benchmark.LlamaCppLlmEngine(
-            appContext = appContext,
-            contentResolver = contentResolver
-        )
-        refreshEngineFactory()
-    }
-
-    private fun initializeLiteRtEngine(contentResolver: ContentResolver) {
-        liteRtEngine = com.hilal.llm.benchmark.LiteRtLlmEngine(
-            appContext = appContext,
-            contentResolver = contentResolver
-        )
-        refreshEngineFactory()
-    }
-
-    private fun initializeExecuTorchEngine(contentResolver: ContentResolver) {
-        execuTorchEngine = com.hilal.llm.benchmark.ExecuTorchLlmEngine(
-            appContext = appContext,
-            contentResolver = contentResolver
-        )
-        refreshEngineFactory()
     }
 
     override fun onCleared() {
