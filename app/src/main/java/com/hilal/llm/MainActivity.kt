@@ -88,6 +88,7 @@ class MainActivity : ComponentActivity() {
     private val chatViewModel: com.hilal.llm.chat.ChatViewModel by viewModels {
         com.hilal.llm.chat.ChatViewModel.Factory(filesDir, runtimeOwner.runtime.sessions)
     }
+    private val experimentViewModel: com.hilal.llm.lab.ExperimentViewModel by viewModels()
     private val viewModel: BenchmarkViewModel by viewModels()
     private val ragViewModel: RagViewModel by viewModels()
     private val embeddingComparisonViewModel: RagComparisonViewModel by viewModels()
@@ -136,7 +137,7 @@ class MainActivity : ComponentActivity() {
             if (result.resultCode != Activity.RESULT_OK) return@registerForActivityResult
             result.data?.getStringExtra(ModelCatalogActivity.EXTRA_DELETE_MODEL_ID)?.let { id ->
                 val rag = ragViewModel.uiState.value
-                if (chatViewModel.chat.uiState.value.running || viewModel.uiState.value.isRunning ||
+                if (experimentViewModel.state.value.running || chatViewModel.chat.uiState.value.running || viewModel.uiState.value.isRunning ||
                     testViewModel.uiState.value.isRunning || rag.isGenerating || rag.isIndexingDocument ||
                     embeddingComparisonViewModel.state.value.busy || imageComparisonViewModel.state.value.busy) {
                     android.widget.Toast.makeText(this, "Devam eden model işlemi bitince tekrar deneyin.", android.widget.Toast.LENGTH_LONG).show()
@@ -169,6 +170,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             LLMTheme {
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+                val experimentState by experimentViewModel.state.collectAsStateWithLifecycle()
                 val generationModelState by generationModels.uiState.collectAsStateWithLifecycle()
                 LaunchedEffect(generationModelState.errorMessage) {
                     generationModelState.errorMessage?.let { message ->
@@ -188,13 +190,16 @@ class MainActivity : ComponentActivity() {
                         startDestination = MainDestination.CHAT.route,
                         modifier = Modifier.padding(innerPadding).consumeWindowInsets(innerPadding)
                     ) {
+                        composable(MainDestination.EXPERIMENT.route) {
+                            com.hilal.llm.lab.ExperimentScreen(experimentViewModel, generationModels, runtimeOwner.runtime.sessions)
+                        }
                         composable(MainDestination.LAB.route) {
-                            com.hilal.llm.lab.LaboratoryScreen { destination -> navController.navigate(destination.route) }
+                            com.hilal.llm.lab.LaboratoryScreen(running = experimentState.running) { destination -> navController.navigate(destination.route) }
                         }
                         composable(MainDestination.CHAT.route) {
                             com.hilal.llm.chat.ChatRoute(chatViewModel, generationModels) {
                                 val rag = ragViewModel.uiState.value
-                                !viewModel.uiState.value.isRunning && !testViewModel.uiState.value.isRunning &&
+                                !experimentViewModel.state.value.running && !viewModel.uiState.value.isRunning && !testViewModel.uiState.value.isRunning &&
                                     !rag.isIndexingDocument && !rag.isGenerating && rag.pendingDownloadModelId == null &&
                                     !embeddingComparisonViewModel.state.value.busy && !imageComparisonViewModel.state.value.busy
                             }
@@ -227,7 +232,12 @@ class MainActivity : ComponentActivity() {
                             RagComparisonRoute(embeddingComparisonViewModel, imageComparisonViewModel, onBack = { navController.navigateUp() })
                         }
                         composable(MainDestination.RAG.route) {
-                            RagRoute(viewModel = ragViewModel)
+                            if (experimentState.running) {
+                                Column(Modifier.padding(24.dp)) {
+                                    Text("Model deneyi sürüyor. Belge işlemleri için deneyi bitirin veya durdurun.")
+                                    TextButton(onClick = experimentViewModel::stop) { Text("Deneyi durdur") }
+                                }
+                            } else RagRoute(viewModel = ragViewModel)
                         }
                         composable(MainDestination.TEST.route) {
                             TestRoute(

@@ -9,6 +9,14 @@ import org.junit.Test
 
 class EmbeddingNavigationTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+    @Test fun modelExperimentIsReachedFromLaboratory() {
+        compose.onNodeWithText("Laboratuvar").performClick()
+        compose.onNodeWithText("Tekrarlanabilir model deneyi").performClick()
+        compose.onNodeWithText("Soğuk başlangıç").assertExists()
+        compose.onNodeWithText("Isıtılmış model").assertExists()
+        compose.onNodeWithText("Çalıştır ve kaydet").assertExists()
+    }
+
     @Test fun comparisonIsReachedFromCompareAndNotRag() {
         compose.onNodeWithText("Laboratuvar").performClick()
         compose.onNodeWithText("Model karşılaştırması").performClick()

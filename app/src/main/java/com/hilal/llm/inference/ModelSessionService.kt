@@ -26,12 +26,14 @@ class ModelSessionService(
     private var cachedBackend: ModelBackendSession? = null
     private var closed = false
 
-    suspend fun openSession(selection: BenchmarkModelSelection): FeatureGenerationSession {
+    suspend fun openSession(selection: BenchmarkModelSelection): FeatureGenerationSession = openSession(selection, false)
+
+    suspend fun openSession(selection: BenchmarkModelSelection, startCold: Boolean): FeatureGenerationSession {
         validateCatalogSelectionForRun(selection)?.let { throw IllegalArgumentException(it) }
         mutex.lock()
         try {
             check(!closed) { "Model service is closed." }
-            if (cachedSelection != selection) {
+            if (startCold || cachedSelection != selection) {
                 releaseCachedModel()
                 cachedBackend = openBackend(selection)
                 cachedSelection = selection

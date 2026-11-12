@@ -24,6 +24,7 @@ enum class MainDestination(
     val label: String,
     val icon: ImageVector
 ) {
+    EXPERIMENT("experiment", "Model deneyi", Icons.Default.Science),
     LAB("lab", "Laboratuvar", Icons.Default.Science),
     CHAT("chat", "Sohbet", Icons.AutoMirrored.Filled.Chat),
     RUN("run", "Run", Icons.Default.PlayArrow),
@@ -44,7 +45,7 @@ fun MainBottomNavigation(
     NavigationBar {
         listOf(MainDestination.CHAT, MainDestination.RAG, MainDestination.LAB, MainDestination.HISTORY).forEach { destination ->
             NavigationBarItem(
-                selected = currentRoute == destination.route || (destination == MainDestination.LAB && currentRoute in setOf(MainDestination.RUN.route, MainDestination.COMPARE.route, MainDestination.EMBEDDING.route, MainDestination.TEST.route)),
+                selected = currentRoute == destination.route || (destination == MainDestination.LAB && currentRoute in setOf(MainDestination.EXPERIMENT.route, MainDestination.RUN.route, MainDestination.COMPARE.route, MainDestination.EMBEDDING.route, MainDestination.TEST.route)),
                 onClick = {
                     navController.navigate(destination.route) {
                         popUpTo(navController.graph.findStartDestination().id) {
