@@ -39,6 +39,7 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
     private val storageResolver = ModelStorageResolver(appContext)
     private val downloadRepository = ModelDownloadRepository(storageResolver)
     private val runFileMapper = ModelRunFileMapper(storageResolver)
+    private val catalog = com.hilal.llm.catalog.ModelCatalogService(storageResolver)
     private val vectorStoreRepository = RagVectorStoreRepository(appContext)
     private var indexedEmbeddingModelId: String? = null
 
@@ -52,6 +53,7 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
     private var contentResolver: ContentResolver? = null
     private var answerGenerator: RagAnswerGenerator? = null
     private var initialized = false
+    private var modelDownloadJob: kotlinx.coroutines.Job? = null
 
     private val _uiState = MutableStateFlow(RagUiState())
     val uiState: StateFlow<RagUiState> = _uiState.asStateFlow()
@@ -227,10 +229,12 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun dismissDownloadDialog() {
+        modelDownloadJob?.cancel()
         _uiState.update { it.copy(pendingDownloadModelId = null, pendingDownloadRole = null) }
     }
 
     fun confirmSelectedModelDownload() {
+        if (modelDownloadJob?.isCompleted == false) return
         val modelId = _uiState.value.pendingDownloadModelId ?: return
         val role = _uiState.value.pendingDownloadRole ?: RagModelRole.GENERATION
         val model = ModelCatalogRepository.getModelById(modelId) ?: run {
@@ -255,9 +259,9 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        viewModelScope.launch {
+        modelDownloadJob = viewModelScope.launch {
             try {
-                downloadRepository.downloadModel(model) { state ->
+                catalog.prepare(model, if (role == RagModelRole.GENERATION) com.hilal.llm.catalog.ModelPurpose.GENERATION else com.hilal.llm.catalog.ModelPurpose.EMBEDDING) { state ->
                     _uiState.update { current ->
                         current.copy(
                             downloadStates = current.downloadStates + (modelId to state),
@@ -278,6 +282,8 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
                         errorMessage = null
                     )
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (throwable: Throwable) {
                 _uiState.update {
                     it.copy(

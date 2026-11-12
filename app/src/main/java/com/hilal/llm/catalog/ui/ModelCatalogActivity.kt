@@ -73,6 +73,7 @@ class ModelCatalogActivity : ComponentActivity() {
                     ModelCatalogScreen(
                         uiState = uiState,
                         onDownload = viewModel::downloadModel,
+                        onCancelDownload = viewModel::cancelDownload,
                         onDelete = viewModel::deleteModel,
                         onRunBenchmark = { modelId ->
                             val selection = viewModel.createBenchmarkSelection(modelId)
@@ -99,6 +100,7 @@ class ModelCatalogActivity : ComponentActivity() {
 private fun ModelCatalogScreen(
     uiState: ModelCatalogUiState,
     onDownload: (String) -> Unit,
+    onCancelDownload: (String) -> Unit,
     onDelete: (String) -> Unit,
     onRunBenchmark: (String) -> Unit,
     modifier: Modifier = Modifier
@@ -135,6 +137,8 @@ private fun ModelCatalogScreen(
                     downloadState = uiState.downloadStates[model.id] ?: DownloadState.Idle,
                     isDownloaded = uiState.downloadStates[model.id] == DownloadState.Success,
                     onDownload = onDownload,
+                    onCancelDownload = onCancelDownload,
+                    isManaging = uiState.isLoading,
                     onDelete = onDelete,
                     onRunBenchmark = onRunBenchmark
                 )
@@ -148,7 +152,9 @@ private fun ModelCatalogCard(
     model: ModelConfig,
     downloadState: DownloadState,
     isDownloaded: Boolean,
+    isManaging: Boolean,
     onDownload: (String) -> Unit,
+    onCancelDownload: (String) -> Unit,
     onDelete: (String) -> Unit,
     onRunBenchmark: (String) -> Unit
 ) {
@@ -231,10 +237,13 @@ private fun ModelCatalogCard(
 
             DownloadStateRow(downloadState = downloadState, model = model)
 
+            if (downloadState is DownloadState.Downloading) {
+                TextButton(onClick = { onCancelDownload(model.id) }) { Text("İndirmeyi iptal et") }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = { onDownload(model.id) },
-                    enabled = model.isEnabled &&
+                    enabled = !isManaging && model.isEnabled &&
                         requiredFilesHaveUrls &&
                         !isDownloaded &&
                         downloadState !is DownloadState.Downloading
@@ -244,14 +253,14 @@ private fun ModelCatalogCard(
 
                 OutlinedButton(
                     onClick = { onDelete(model.id) },
-                    enabled = isDownloaded
+                    enabled = !isManaging && isDownloaded
                 ) {
                     Text("Delete")
                 }
 
                 TextButton(
                     onClick = { onRunBenchmark(model.id) },
-                    enabled = model.isEnabled && isDownloaded && downloadState !is DownloadState.Downloading
+                    enabled = !isManaging && model.isEnabled && isDownloaded && downloadState !is DownloadState.Downloading
                 ) {
                     Text("Run Benchmark")
                 }

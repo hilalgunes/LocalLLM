@@ -14,10 +14,12 @@ import kotlinx.coroutines.withContext
 class ModelDownloadRepository(
     private val storageResolver: ModelStorageResolver
 ) {
+    private val operations = ModelFileOperations.forRoot(storageResolver.storageKey)
+
     suspend fun downloadModel(
         config: ModelConfig,
         onStateChanged: (DownloadState) -> Unit
-    ) {
+    ) = operations.mutate {
         onStateChanged(DownloadState.Idle)
         withContext(Dispatchers.IO) {
             val modelDir = storageResolver.ensureModelDir(config)
@@ -65,8 +67,8 @@ class ModelDownloadRepository(
         return storageResolver.isModelDownloaded(config)
     }
 
-    fun deleteModel(config: ModelConfig): Boolean {
-        return storageResolver.deleteModel(config)
+    suspend fun deleteModel(config: ModelConfig): Boolean = operations.mutate {
+        withContext(Dispatchers.IO) { storageResolver.deleteModel(config) }
     }
 
     private suspend fun downloadSingleFile(

@@ -44,6 +44,7 @@ class BenchmarkViewModel : ViewModel() {
     private val presetRepository = BenchmarkPresetRepository()
     private var benchmarkResultRepository: BenchmarkResultRepository? = null
     private var modelDownloadRepository: ModelDownloadRepository? = null
+    private var catalogService: com.hilal.llm.catalog.ModelCatalogService? = null
     private var modelRunFileMapper: ModelRunFileMapper? = null
     private var activeDownloadJob: Job? = null
     private val _uiState = MutableStateFlow(BenchmarkUiState())
@@ -58,6 +59,7 @@ class BenchmarkViewModel : ViewModel() {
         val downloadRepository = ModelDownloadRepository(storageResolver)
         modelDownloadRepository = downloadRepository
         modelRunFileMapper = ModelRunFileMapper(storageResolver)
+        catalogService = com.hilal.llm.catalog.ModelCatalogService(storageResolver)
 
         val models = ModelCatalogRepository.getAvailableModels()
             .filter { it.purpose == ModelPurpose.GENERATION }
@@ -125,6 +127,7 @@ class BenchmarkViewModel : ViewModel() {
     }
 
     fun selectCatalogModel(modelId: String) {
+        if (activeDownloadJob?.isCompleted == false) return
         val model = ModelCatalogRepository.getModelById(modelId) ?: run {
             _uiState.update { it.copy(errorMessage = "Model not found: $modelId") }
             return
@@ -155,7 +158,7 @@ class BenchmarkViewModel : ViewModel() {
         activeDownloadJob = viewModelScope.launch {
             _uiState.update { it.copy(activeDownloadModelId = model.id, errorMessage = null) }
             try {
-                repository.downloadModel(model) { state ->
+                requireNotNull(catalogService).prepare(model, ModelPurpose.GENERATION) { state ->
                     _uiState.update { current ->
                         current.copy(modelDownloadStates = current.modelDownloadStates + (model.id to state))
                     }
@@ -186,7 +189,7 @@ class BenchmarkViewModel : ViewModel() {
 
     fun cancelModelDownload() {
         activeDownloadJob?.cancel()
-        activeDownloadJob = null
+        // Keep the job until cancellation cleanup has completed.
     }
 
     private fun prepareDownloadedModel(model: ModelConfig) {

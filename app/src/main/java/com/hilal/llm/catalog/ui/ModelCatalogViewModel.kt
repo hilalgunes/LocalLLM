@@ -18,9 +18,10 @@ import kotlinx.coroutines.launch
 class ModelCatalogViewModel(application: Application) : AndroidViewModel(application) {
     private val storageResolver = ModelStorageResolver(application.applicationContext)
     private val downloadRepository = ModelDownloadRepository(storageResolver)
-    private val runFileMapper = ModelRunFileMapper(storageResolver)
+    private val catalog = com.hilal.llm.catalog.ModelCatalogService(storageResolver)
     private val _uiState = MutableStateFlow(ModelCatalogUiState())
     val uiState: StateFlow<ModelCatalogUiState> = _uiState.asStateFlow()
+    private val downloadJobs = mutableMapOf<String, kotlinx.coroutines.Job>()
 
     fun loadModels() {
         val models = ModelCatalogRepository.getAvailableModels()
@@ -38,15 +39,16 @@ class ModelCatalogViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun downloadModel(modelId: String) {
+        if (downloadJobs[modelId]?.isCompleted == false || _uiState.value.isLoading) return
         val model = ModelCatalogRepository.getModelById(modelId) ?: run {
             _uiState.update { it.copy(errorMessage = "Model not found: $modelId") }
             return
         }
 
-        viewModelScope.launch {
+        downloadJobs[modelId] = viewModelScope.launch {
             _uiState.update { it.copy(errorMessage = null) }
             try {
-                downloadRepository.downloadModel(model) { state ->
+                catalog.prepare(model, model.purpose) { state ->
                     _uiState.update { current ->
                         current.copy(
                             downloadStates = current.downloadStates + (modelId to state),
@@ -63,6 +65,7 @@ class ModelCatalogViewModel(application: Application) : AndroidViewModel(applica
                     )
                 }
             } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                _uiState.update { it.copy(downloadStates = it.downloadStates + (modelId to DownloadState.Idle)) }
                 throw cancellation
             } catch (throwable: Throwable) {
                 _uiState.update {
@@ -77,21 +80,23 @@ class ModelCatalogViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    fun cancelDownload(modelId: String) { downloadJobs[modelId]?.cancel() }
+
     fun deleteModel(modelId: String) {
         val model = ModelCatalogRepository.getModelById(modelId) ?: run {
             _uiState.update { it.copy(errorMessage = "Model not found: $modelId") }
             return
         }
 
-        val deleted = downloadRepository.deleteModel(model)
-        if (deleted) {
-            _uiState.update { current ->
-                current.copy(
-                    downloadStates = current.downloadStates + (modelId to DownloadState.Idle)
-                )
-            }
-        } else {
-            _uiState.update { it.copy(errorMessage = "Unable to delete model: ${model.displayName}") }
+        if (_uiState.value.isLoading) return
+        _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+        viewModelScope.launch {
+            try {
+                check(downloadRepository.deleteModel(model)) { "Unable to delete model: ${model.displayName}" }
+                _uiState.update { it.copy(downloadStates = it.downloadStates + (modelId to DownloadState.Idle)) }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (failure: Exception) { _uiState.update { it.copy(errorMessage = failure.message) } }
+            finally { _uiState.update { it.copy(isLoading = false) } }
         }
     }
 
@@ -117,16 +122,7 @@ class ModelCatalogViewModel(application: Application) : AndroidViewModel(applica
         }
 
         return try {
-            val runFiles = runFileMapper.toRunFiles(model)
-            BenchmarkModelSelection(
-                modelId = model.id,
-                displayName = model.displayName,
-                runtimeType = model.runtimeType,
-                engineType = model.engineType,
-                promptTemplateType = model.promptTemplateType,
-                modelPath = runFiles.modelPath,
-                tokenizerPath = runFiles.tokenizerPath
-            )
+            catalog.resolve(model)
         } catch (throwable: Throwable) {
             _uiState.update {
                 it.copy(errorMessage = throwable.message ?: "Unable to prepare benchmark files.")

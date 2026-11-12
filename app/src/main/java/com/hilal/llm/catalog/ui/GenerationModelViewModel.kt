@@ -28,7 +28,7 @@ data class GenerationModelUiState(
 class GenerationModelViewModel(application: Application) : AndroidViewModel(application) {
     private val storage = ModelStorageResolver(application)
     private val downloads = ModelDownloadRepository(storage)
-    private val mapper = ModelRunFileMapper(storage)
+    private val catalog = ModelCatalogService(storage)
     private val state = MutableStateFlow(GenerationModelUiState())
     val uiState = state.asStateFlow()
     private var download: Job? = null
@@ -60,7 +60,7 @@ class GenerationModelViewModel(application: Application) : AndroidViewModel(appl
         viewModelScope.launch {
             try {
                 withReleasedRuntime {
-                    withContext(Dispatchers.IO) { check(storage.deleteModel(model)) { "Model dosyaları silinemedi." } }
+                    check(downloads.deleteModel(model)) { "Model dosyaları silinemedi." }
                 }
                 state.update { it.copy(selectedCatalogModel = it.selectedCatalogModel?.takeUnless { selection -> selection.modelId == id }) }
             } catch (cancelled: CancellationException) { throw cancelled }
@@ -98,11 +98,10 @@ class GenerationModelViewModel(application: Application) : AndroidViewModel(appl
         state.update { it.copy(selectedEngineType = engineFor(model.runtimeType), errorMessage = null, activeDownloadModelId = id) }
         download = viewModelScope.launch {
             try {
-                if (!downloads.isModelDownloaded(model)) downloads.downloadModel(model) { progress ->
+                val selected = catalog.prepare(model, ModelPurpose.GENERATION) { progress ->
                     if (requestId == currentRequest) state.update { it.copy(modelDownloadStates = it.modelDownloadStates + (id to progress)) }
                 }
                 ensureActive()
-                val selected = selection(model)
                 if (requestId == currentRequest) {
                     state.update { it.copy(selectedCatalogModel = selected, modelDownloadStates = it.modelDownloadStates + (id to DownloadState.Success)) }
                     onSelected(selected)
@@ -132,10 +131,7 @@ class GenerationModelViewModel(application: Application) : AndroidViewModel(appl
             }
         }
     }
-    private fun selection(model: ModelConfig): BenchmarkModelSelection {
-        val files = mapper.toRunFiles(model)
-        return BenchmarkModelSelection(model.id, model.displayName, model.runtimeType, model.engineType, model.promptTemplateType, files.modelPath, files.tokenizerPath)
-    }
+    private fun selection(model: ModelConfig) = catalog.resolve(model)
     private fun engineFor(runtime: RuntimeType) = when (runtime) {
         RuntimeType.LITERT -> EngineType.LITERT
         RuntimeType.LLAMA_CPP -> EngineType.LLAMA_CPP

@@ -10,6 +10,8 @@ class ModelStorageResolver(
 ) {
     constructor(context: Context) : this(context.filesDir)
 
+    internal val storageKey: String get() = filesDir.canonicalPath
+
     fun getModelDir(config: ModelConfig): File {
         val modelsDir = File(filesDir, MODELS_DIR_NAME)
         val runtimeDir = File(modelsDir, config.runtimeType.name.lowercase())
