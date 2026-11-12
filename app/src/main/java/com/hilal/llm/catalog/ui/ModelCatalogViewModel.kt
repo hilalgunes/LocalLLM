@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
 class ModelCatalogViewModel(application: Application) : AndroidViewModel(application) {
@@ -23,8 +24,15 @@ class ModelCatalogViewModel(application: Application) : AndroidViewModel(applica
     val uiState: StateFlow<ModelCatalogUiState> = _uiState.asStateFlow()
     private val downloadJobs = mutableMapOf<String, kotlinx.coroutines.Job>()
 
+    init {
+        viewModelScope.launch { downloadRepository.inventory.collect { inventory ->
+            _uiState.update { it.copy(downloadStates = it.downloadStates + inventory.mapValues { entry -> entry.value.state }) }
+        } }
+    }
+
     fun loadModels() {
         val models = ModelCatalogRepository.getAvailableModels()
+        viewModelScope.launch { downloadRepository.refreshInventory(models) }
         val downloadStates = models.associate { model ->
             model.id to if (downloadRepository.isModelDownloaded(model)) {
                 DownloadState.Success

@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
@@ -47,6 +48,7 @@ class BenchmarkViewModel : ViewModel() {
     private var catalogService: com.hilal.llm.catalog.ModelCatalogService? = null
     private var modelRunFileMapper: ModelRunFileMapper? = null
     private var activeDownloadJob: Job? = null
+    private var inventoryJob: Job? = null
     private val _uiState = MutableStateFlow(BenchmarkUiState())
     val uiState: StateFlow<BenchmarkUiState> = _uiState.asStateFlow()
 
@@ -58,11 +60,19 @@ class BenchmarkViewModel : ViewModel() {
         val storageResolver = ModelStorageResolver(appContext.applicationContext)
         val downloadRepository = ModelDownloadRepository(storageResolver)
         modelDownloadRepository = downloadRepository
+        inventoryJob?.cancel()
+        inventoryJob = viewModelScope.launch { downloadRepository.inventory.collect { inventory ->
+            _uiState.update { it.copy(modelDownloadStates = it.modelDownloadStates + inventory.mapValues { entry -> entry.value.state }) }
+            _uiState.value.selectedCatalogModel?.modelId?.let { id ->
+                if (inventory[id]?.let { !it.ready && it.state == DownloadState.Idle } == true) onModelDeleted(id)
+            }
+        } }
         modelRunFileMapper = ModelRunFileMapper(storageResolver)
         catalogService = com.hilal.llm.catalog.ModelCatalogService(storageResolver)
 
         val models = ModelCatalogRepository.getAvailableModels()
             .filter { it.purpose == ModelPurpose.GENERATION }
+        viewModelScope.launch { downloadRepository.refreshInventory(models) }
         val states = models.associate { model ->
             model.id to if (downloadRepository.isModelDownloaded(model)) {
                 DownloadState.Success

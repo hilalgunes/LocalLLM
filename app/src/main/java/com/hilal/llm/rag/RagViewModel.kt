@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.os.SystemClock
@@ -57,6 +58,16 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _uiState = MutableStateFlow(RagUiState())
     val uiState: StateFlow<RagUiState> = _uiState.asStateFlow()
+
+    init {
+        viewModelScope.launch { downloadRepository.inventory.collect { inventory ->
+            _uiState.update { current -> current.copy(
+                downloadStates = current.downloadStates + inventory.mapValues { it.value.state },
+                selectedGenerationModelId = current.selectedGenerationModelId?.takeUnless { inventory[it]?.let { entry -> !entry.ready && entry.state == DownloadState.Idle } == true },
+                selectedEmbeddingModelId = current.selectedEmbeddingModelId?.takeUnless { inventory[it]?.let { entry -> !entry.ready && entry.state == DownloadState.Idle } == true }
+            ) }
+        } }
+    }
 
     fun initialize(contentResolver: ContentResolver, sessions: ModelSessionService) {
         this.contentResolver = contentResolver
@@ -97,6 +108,7 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
 
     fun loadModels() {
         val models = ModelCatalogRepository.getAvailableModels()
+        viewModelScope.launch { downloadRepository.refreshInventory(models) }
         val downloadStates = models.associate { model ->
             model.id to if (downloadRepository.isModelDownloaded(model)) {
                 DownloadState.Success

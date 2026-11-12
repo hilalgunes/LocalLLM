@@ -5,6 +5,7 @@ import com.hilal.llm.catalog.ModelConfig
 import com.hilal.llm.catalog.ModelFileConfig
 import com.hilal.llm.catalog.storage.ModelStorageResolver
 import java.io.File
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -16,10 +17,41 @@ class ModelDownloadRepository(
 ) {
     private val operations = ModelFileOperations.forRoot(storageResolver.storageKey)
 
+    val inventory = operations.inventory
+
+    suspend fun refreshInventory(models: List<ModelConfig>) = operations.mutate {
+        withContext(Dispatchers.IO) { models.forEach { publishInventory(it) } }
+    }
+
+    private fun publishInventory(config: ModelConfig, failure: Throwable? = null) {
+        val ready = storageResolver.isModelDownloaded(config)
+        val state = when {
+            ready -> DownloadState.Success
+            failure != null && failure !is CancellationException -> DownloadState.Failed(failure.message ?: "Model işlemi başarısız.")
+            else -> DownloadState.Idle
+        }
+        operations.publish(config.id, ModelInventoryEntry(ready, storageResolver.storedBytes(config), state))
+    }
+
     suspend fun downloadModel(
         config: ModelConfig,
         onStateChanged: (DownloadState) -> Unit
     ) = operations.mutate {
+        var failure: Throwable? = null
+        try {
+            downloadFiles(config) { state ->
+                operations.progress(config.id, state)
+                onStateChanged(state)
+            }
+        } catch (error: Throwable) {
+            failure = error
+            throw error
+        } finally {
+            withContext(NonCancellable + Dispatchers.IO) { publishInventory(config, failure) }
+        }
+    }
+
+    private suspend fun downloadFiles(config: ModelConfig, onStateChanged: (DownloadState) -> Unit) {
         onStateChanged(DownloadState.Idle)
         withContext(Dispatchers.IO) {
             val modelDir = storageResolver.ensureModelDir(config)
@@ -68,7 +100,11 @@ class ModelDownloadRepository(
     }
 
     suspend fun deleteModel(config: ModelConfig): Boolean = operations.mutate {
-        withContext(Dispatchers.IO) { storageResolver.deleteModel(config) }
+        withContext(Dispatchers.IO) {
+            val deleted = storageResolver.deleteModel(config)
+            publishInventory(config)
+            deleted
+        }
     }
 
     private suspend fun downloadSingleFile(

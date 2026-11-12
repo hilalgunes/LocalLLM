@@ -34,12 +34,24 @@ class GenerationModelViewModel(application: Application) : AndroidViewModel(appl
     private var download: Job? = null
     private var requestId = 0L
 
-    init { refresh() }
+    init {
+        viewModelScope.launch {
+            downloads.inventory.collect { inventory ->
+                state.update { current -> current.copy(
+                    storedBytes = current.storedBytes + inventory.mapValues { it.value.storedBytes },
+                    modelDownloadStates = current.modelDownloadStates + inventory.mapValues { it.value.state },
+                    selectedCatalogModel = current.selectedCatalogModel?.takeUnless { inventory[it.modelId]?.let { entry -> !entry.ready && entry.state == DownloadState.Idle } == true }
+                ) }
+            }
+        }
+        refresh()
+    }
     fun refresh() {
         viewModelScope.launch { refreshStorage() }
     }
     private suspend fun refreshStorage() {
         val models = ModelCatalogRepository.getAvailableModels().filter { it.purpose == ModelPurpose.GENERATION }
+        downloads.refreshInventory(models)
         val inventory = withContext(Dispatchers.IO) {
             models.associate { it.id to (downloads.isModelDownloaded(it) to storage.storedBytes(it)) }
         }
@@ -54,7 +66,9 @@ class GenerationModelViewModel(application: Application) : AndroidViewModel(appl
             }) }
     }
     fun deleteModel(id: String, withReleasedRuntime: suspend (suspend () -> Unit) -> Unit) {
-        if (state.value.activeDownloadModelId != null || state.value.deletingModelId != null) return
+        if (state.value.activeDownloadModelId != null || state.value.deletingModelId != null) {
+            state.update { it.copy(errorMessage = "Devam eden model işlemi bitince tekrar deneyin.") }; return
+        }
         val model = ModelCatalogRepository.getModelById(id) ?: return
         state.update { it.copy(deletingModelId = id, errorMessage = null) }
         viewModelScope.launch {

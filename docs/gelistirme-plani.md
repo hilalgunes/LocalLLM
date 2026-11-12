@@ -41,7 +41,7 @@ Stash kayıtları yalnızca ilgili yerel depodadır; normal push ile gönderilme
 ## 3. Modelleri eşitle
 
 - [x] Android sohbet ve iOS sohbet/embedding modellerinde indirme, iptal, yeniden deneme ve silme kontrollerini ekle.
-- [ ] Android eski benchmark/RAG model kataloglarını aynı yönetim akışına taşı.
+- [x] Android eski benchmark/RAG model kataloglarını aynı yönetim akışına taşı.
 - [x] Yönetim ekranlarında model amacı ve runtime bilgisini göster.
 - [x] Kullanılan disk alanı, boş alan ve eksik dosya durumunu göster.
 - [ ] Fiziksel cihaz belleği ve native runtime uyumluluğunu ölçerek model bazında öneri sun.
@@ -171,3 +171,9 @@ iOS: derleme başarılı; iPhone 18 Pro / iOS 27 simülatöründe 20 test, 0 hat
 - Silme önce embedding sağlayıcısını ve üretim oturumunu bırakır; dosya işlemi tamamlanana kadar ilgili oturum kilitleri tutulur. Aktif sohbet, test, benchmark, RAG ve karşılaştırma sırasında istek reddedilir.
 - Silinen model benchmark/RAG seçimlerinden çıkarılır. Silme onayı ve yönetim hatalarının ana ekranda gösterimi eklendi.
 - Android debug derlemesi ve 61 birim testi başarılı. Yeni test dosya yönetimi bitmeden embedding sağlayıcısının yeniden açılmadığını doğrular.
+
+## Adım 3.3 — ekranlar arasında ortak model envanteri (12 Kasım 2026)
+
+- Sohbet, benchmark, RAG ve katalog aynı depolama kökünün indirme/hazır/başarısız durumunu izler. Silme ve indirme tamamlanınca diğer ekranların envanteri de güncellenir; silinen modelin seçimi temizlenir.
+- Envanter taraması, indirme ve silmeyle aynı dosya kilidini kullanır. Farklı ekranların kendi model seçimleri ve deney ayarları bağımsız kalır.
+- Android debug derlemesi ve 63 birim testi başarılı. İki farklı katalog istemcisinin aynı silme sonucunu gördüğü ve bir modelin ilerlemesinin diğerinin durumunu silmediği test edildi.
