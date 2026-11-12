@@ -61,7 +61,7 @@ Stash kayıtları yalnızca ilgili yerel depodadır; normal push ile gönderilme
 - [ ] Ortak deney/sonuç şeması: model sürümü, prompt, parametreler, chunking, top-k ve süre tanımları.
 - [x] Soğuk yükleme ile sıcak üretim ölçümlerini ayır.
 - [x] Kaydedilmiş deneyi tekrar çalıştırmayı sağla.
-- [ ] Yedekteki OCR/GPU deneylerinden uygun olanları ayrı adımlarla geri getir.
+- [x] Yedekteki OCR/GPU deneylerinden uygun olanları ayrı adımlarla geri getir.
 
 ## Adım 1 doğrulama kaydı — 5 Kasım 2026
 
@@ -204,3 +204,9 @@ iOS: derleme başarılı; iPhone 18 Pro / iOS 27 simülatöründe 20 test, 0 hat
 - Kendi SQLite/vektör JNI kütüphanemizin NDK 27 derlemesi 16 KB hizalamaya taşındı. APK için tekrarlanabilir ELF/ZIP denetim aracı ve sonuç raporu eklendi.
 - 20 arm64 kütüphaneden 19'u kontrolü geçti; ONNX GenAI 0.15.2 paketindeki libmat.so hâlâ uyumsuz. Bu nedenle tam native uyumluluk maddesi açık.
 - Debug derlemesi, üç araç testi ve Samsung/Pixel üzerinde kalıcı vektör testi geçti. Gerçek model bellek/üretim ölçümü yapılmadı.
+
+## Adım 5.3 — seçili OCR/GPU deneylerini geri alma (12 Kasım 2026)
+
+- Stash içinden bağımsız OCR satır görüntüsü hazırlama bileşeni geri alındı. Üç test Samsung ve Pixel üzerinde geçti. OCR tanıma motoru/ekranı ve büyük model dosyaları geri alınmadı; bu adım tam OCR özelliği değildir.
+- OpenCL/Perfetto kayıt analizi aracı ayrı adımda geri alındı. Üç test ısınma, hata ve zaman hizalaması davranışını doğrular. Native GPU yamaları uygulanmadı ve yeni GPU performans sonucu üretilmedi.
+- Her iki stash kaydı korunur. Model katalog/dağıtım entegrasyonu ve yeni GPU ölçümleri ileri deney olarak kalır.
