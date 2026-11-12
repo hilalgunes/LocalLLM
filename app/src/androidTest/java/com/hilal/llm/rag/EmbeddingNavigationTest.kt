@@ -10,7 +10,8 @@ import org.junit.Test
 class EmbeddingNavigationTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
     @Test fun comparisonIsReachedFromCompareAndNotRag() {
-        compose.onNodeWithText("Compare").performClick()
+        compose.onNodeWithText("Laboratuvar").performClick()
+        compose.onNodeWithText("Model karşılaştırması").performClick()
         compose.onNodeWithText("Embedding sayfasını aç").performClick()
         compose.onNodeWithText("Embedding · Görsel arama").assertExists()
         compose.onNodeWithText("Metin → Metin").performClick()

@@ -188,6 +188,9 @@ class MainActivity : ComponentActivity() {
                         startDestination = MainDestination.CHAT.route,
                         modifier = Modifier.padding(innerPadding).consumeWindowInsets(innerPadding)
                     ) {
+                        composable(MainDestination.LAB.route) {
+                            com.hilal.llm.lab.LaboratoryScreen { destination -> navController.navigate(destination.route) }
+                        }
                         composable(MainDestination.CHAT.route) {
                             com.hilal.llm.chat.ChatRoute(chatViewModel, generationModels) {
                                 val rag = ragViewModel.uiState.value

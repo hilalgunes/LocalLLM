@@ -24,13 +24,14 @@ enum class MainDestination(
     val label: String,
     val icon: ImageVector
 ) {
+    LAB("lab", "Laboratuvar", Icons.Default.Science),
     CHAT("chat", "Sohbet", Icons.AutoMirrored.Filled.Chat),
     RUN("run", "Run", Icons.Default.PlayArrow),
     COMPARE("compare", "Compare", Icons.AutoMirrored.Filled.CompareArrows),
     EMBEDDING("embedding", "Embedding", Icons.Default.Hub),
     RAG("rag", "RAG", Icons.Default.AccountTree),
     TEST("test", "Test", Icons.Default.Science),
-    HISTORY("history", "History", Icons.Default.History)
+    HISTORY("history", "Sonuçlar", Icons.Default.History)
 }
 
 @Composable
@@ -41,16 +42,16 @@ fun MainBottomNavigation(
     val currentRoute = backStackEntry?.destination?.route
 
     NavigationBar {
-        MainDestination.entries.filter { it != MainDestination.EMBEDDING }.forEach { destination ->
+        listOf(MainDestination.CHAT, MainDestination.RAG, MainDestination.LAB, MainDestination.HISTORY).forEach { destination ->
             NavigationBarItem(
-                selected = currentRoute == destination.route || (destination == MainDestination.COMPARE && currentRoute == MainDestination.EMBEDDING.route),
+                selected = currentRoute == destination.route || (destination == MainDestination.LAB && currentRoute in setOf(MainDestination.RUN.route, MainDestination.COMPARE.route, MainDestination.EMBEDDING.route, MainDestination.TEST.route)),
                 onClick = {
                     navController.navigate(destination.route) {
                         popUpTo(navController.graph.findStartDestination().id) {
-                            saveState = true
+                            saveState = destination != MainDestination.LAB
                         }
                         launchSingleTop = true
-                        restoreState = true
+                        restoreState = destination != MainDestination.LAB
                     }
                 },
                 icon = {
