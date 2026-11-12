@@ -26,7 +26,10 @@ import android.os.SystemClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 
-class RagViewModel(application: Application) : AndroidViewModel(application) {
+class RagViewModel @JvmOverloads constructor(
+    application: Application,
+    private val embeddingFactory: ((String, RuntimeType) -> RagEmbeddingProvider)? = null
+) : AndroidViewModel(application) {
     companion object {
         private const val DEFAULT_MAX_TOKENS = 512
         private const val TAG = "RagViewModel"
@@ -42,7 +45,28 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
     private val runFileMapper = ModelRunFileMapper(storageResolver)
     private val catalog = com.hilal.llm.catalog.ModelCatalogService(storageResolver)
     private val vectorStoreRepository = RagVectorStoreRepository(appContext)
-    private var indexedEmbeddingModelId: String? = null
+    private val indexPreferences = appContext.getSharedPreferences("rag-index", 0)
+    private var indexedEmbeddingModelId: String? = indexPreferences.getString("embedding-model", null)
+
+    private suspend fun recordIndexModel(id: String?) {
+        withContext(Dispatchers.IO) {
+            check(indexPreferences.edit().putString("embedding-model", id).commit()) { "İndeks model bilgisi kaydedilemedi." }
+        }
+        indexedEmbeddingModelId = id
+    }
+
+    private val documentOperationBusy: Boolean get() = _uiState.value.isGenerating || _uiState.value.isIndexingDocument
+
+    private fun changeDocuments(block: suspend () -> Unit) {
+        if (documentOperationBusy) return
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            _uiState.update { it.copy(isIndexingDocument = true, errorMessage = null) }
+            try { block() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { reportError(failure.message ?: "Belge işlemi tamamlanamadı.") }
+            finally { _uiState.update { it.copy(isIndexingDocument = false, indexingDocumentName = null) } }
+        }
+    }
 
     private data class ChunkingConfig(
         val chunkSize: Int,
@@ -137,57 +161,27 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectEmbeddingModel(modelId: String) {
-        val previousModelId = _uiState.value.selectedEmbeddingModelId
+        if (documentOperationBusy) return
         if (selectModel(modelId, RagModelRole.EMBEDDING)) {
-            viewModelScope.launch {
-                try {
-                    if (previousModelId != modelId) {
-                        rebuildCurrentEmbeddings(requireEmbeddingModel = _uiState.value.documentChunks.isNotEmpty())
-                    }
-                    if (_uiState.value.selectedVectorStoreBackend == RagVectorStoreBackend.GRAPH_RAG) {
-                        vectorStoreRepository.rebuildGraphIndex()
-                    }
-                } catch (throwable: Throwable) {
-                    _uiState.update {
-                        it.copy(
-                            errorMessage = buildDetailedErrorMessage("Embedding model initialization failed", throwable)
-                        )
-                    }
+            changeDocuments {
+                if (indexedEmbeddingModelId != modelId) {
+                    rebuildCurrentEmbeddings(requireEmbeddingModel = _uiState.value.documentChunks.isNotEmpty())
+                    refreshVectorStoreSnapshot()
                 }
             }
         }
     }
 
     fun selectVectorStoreBackend(backend: RagVectorStoreBackend) {
-        _uiState.update {
-            it.copy(
-                selectedVectorStoreBackend = backend,
-                errorMessage = null
-            )
-        }
-        viewModelScope.launch {
-            try {
-                if (backend == RagVectorStoreBackend.GRAPH_RAG) {
-                    vectorStoreRepository.rebuildGraphIndex()
-                    refreshVectorStoreSnapshot()
-                } else {
-                    refreshVectorStoreSnapshot()
-                }
-            } catch (throwable: Throwable) {
-                _uiState.update { current ->
-                    current.copy(
-                        errorMessage = if (backend == RagVectorStoreBackend.GRAPH_RAG) {
-                            throwable.message ?: "Graph index could not be rebuilt."
-                        } else {
-                            throwable.message ?: "Embedding reindex failed."
-                        }
-                    )
-                }
-            }
+        changeDocuments {
+            if (backend == RagVectorStoreBackend.GRAPH_RAG) vectorStoreRepository.rebuildGraphIndex()
+            refreshVectorStoreSnapshot()
+            _uiState.update { it.copy(selectedVectorStoreBackend = backend) }
         }
     }
 
     private fun selectModel(modelId: String, role: RagModelRole): Boolean {
+        if (documentOperationBusy) return false
         val model = ModelCatalogRepository.getModelById(modelId) ?: run {
             _uiState.update { it.copy(errorMessage = "Model not found: $modelId") }
             return false
@@ -322,101 +316,30 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun addDocument(displayName: String, text: String) {
-        val trimmedText = text.trim()
-        if (trimmedText.isBlank()) {
-            _uiState.update { it.copy(errorMessage = "$displayName is empty.") }
-            return
-        }
-
-        val documentId = createDocumentId()
-
-        viewModelScope.launch {
-            _uiState.update {
-                it.copy(
-                    isIndexingDocument = true,
-                    indexingDocumentName = displayName,
-                    errorMessage = null
-                )
-            }
-            try {
-                val state = _uiState.value
-                val embeddingModel = resolveSelectedEmbeddingModel(state.models)
-                if (embeddingModel == null) {
-                    _uiState.update {
-                        it.copy(
-                            isIndexingDocument = false,
-                            indexingDocumentName = null,
-                            errorMessage = "Önce bir embedding model seç."
-                        )
-                    }
-                    return@launch
-                }
-                val (document, chunks) = buildDocumentAndChunksForEmbeddingModel(
-                    documentId = documentId,
-                    displayName = displayName,
-                    text = trimmedText,
-                    embeddingModel = embeddingModel
-                )
-                val chunkEmbeddings = buildChunkEmbeddings(chunks, embeddingModel)
-                vectorStoreRepository.upsertDocument(
-                    document = document,
-                    chunks = chunks,
-                    chunkEmbeddings = chunks.map { chunk ->
-                        chunkEmbeddings[chunkEmbeddingKey(chunk)]
-                            ?: error("Embedding missing for ${chunk.documentName} / parça ${chunk.chunkIndex + 1}")
-                    }
-                )
-                refreshVectorStoreSnapshot()
-                indexedEmbeddingModelId = embeddingModel.modelId
-                _uiState.update {
-                    it.copy(
-                        isIndexingDocument = false,
-                        indexingDocumentName = null
-                    )
-                }
-            } catch (throwable: Throwable) {
-                _uiState.update {
-                    it.copy(
-                        isIndexingDocument = false,
-                        indexingDocumentName = null,
-                        errorMessage = buildDetailedErrorMessage("Belge kaydedilemedi", throwable)
-                    )
-                }
-            }
+        val trimmed = text.trim()
+        if (trimmed.isBlank()) { reportError("$displayName boş."); return }
+        changeDocuments {
+            _uiState.update { it.copy(indexingDocumentName = displayName) }
+            val model = resolveSelectedEmbeddingModel(_uiState.value.models)
+                ?: error("Önce bir embedding model seç.")
+            if (indexedEmbeddingModelId != model.modelId) rebuildCurrentEmbeddings(requireEmbeddingModel = true)
+            val (document, chunks) = buildDocumentAndChunksForEmbeddingModel(createDocumentId(), displayName, trimmed, model)
+            val vectors = buildChunkEmbeddings(chunks, model)
+            vectorStoreRepository.upsertDocument(document, chunks, chunks.map { requireNotNull(vectors[chunkEmbeddingKey(it)]) })
+            recordIndexModel(model.modelId)
+            refreshVectorStoreSnapshot()
         }
     }
 
-    fun removeDocument(documentId: String) {
-        viewModelScope.launch {
-            try {
-                vectorStoreRepository.removeDocument(documentId)
-                refreshVectorStoreSnapshot()
-            } catch (throwable: Throwable) {
-                _uiState.update {
-                    it.copy(errorMessage = throwable.message ?: "Document could not be removed.")
-                }
-            }
-        }
+    fun removeDocument(documentId: String) = changeDocuments {
+        vectorStoreRepository.removeDocument(documentId)
+        refreshVectorStoreSnapshot()
     }
 
-    fun clearDocuments() {
-        viewModelScope.launch {
-            try {
-                vectorStoreRepository.clear()
-                _uiState.update {
-                    it.copy(
-                        documents = emptyList(),
-                        documentChunks = emptyList(),
-                        highlightedSources = emptyList(),
-                        errorMessage = null
-                    )
-                }
-            } catch (throwable: Throwable) {
-                _uiState.update {
-                    it.copy(errorMessage = throwable.message ?: "Documents could not be cleared.")
-                }
-            }
-        }
+    fun clearDocuments() = changeDocuments {
+        vectorStoreRepository.clear()
+        recordIndexModel(null)
+        refreshVectorStoreSnapshot()
     }
 
     fun updateQuestion(question: String) {
@@ -491,6 +414,9 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
                 val embeddingModel = resolveSelectedEmbeddingModel(current.models) ?: run {
                     _uiState.update { it.copy(errorMessage = "Önce bir embedding model seç.") }
                     return@launch
+                }
+                if (indexedEmbeddingModelId != embeddingModel.modelId) {
+                    rebuildCurrentEmbeddings(requireEmbeddingModel = true)
                 }
                 val questionEmbedding = embedText(
                     text = question,
@@ -571,6 +497,8 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
                 documents = snapshot.documents,
                 documentChunks = snapshot.chunks,
                 highlightedSources = emptyList(),
+                answer = "",
+                answerMetrics = null,
                 errorMessage = null
             )
         }
@@ -601,6 +529,7 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
             }
         if (state.documents.isEmpty()) {
             vectorStoreRepository.reindexAll(emptyMap())
+            recordIndexModel(embeddingModel.modelId)
             return
         }
 
@@ -622,7 +551,7 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
             ),
             chunkEmbeddings = chunkEmbeddings
         )
-        indexedEmbeddingModelId = embeddingModel.modelId
+        recordIndexModel(embeddingModel.modelId)
     }
 
     private fun buildDocumentAndChunksForEmbeddingModel(
@@ -671,7 +600,7 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun createEmbeddingProvider(embeddingModel: ResolvedEmbeddingModel): RagEmbeddingProvider =
-        when (embeddingModel.runtimeType) {
+        embeddingFactory?.invoke(embeddingModel.modelId, embeddingModel.runtimeType) ?: when (embeddingModel.runtimeType) {
             RuntimeType.LLAMA_CPP -> {
                 val resolver = contentResolver ?: error("Embedding provider is not initialized.")
                 LlamaCppRagEmbeddingProvider(resolver)
