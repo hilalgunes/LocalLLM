@@ -37,6 +37,12 @@ internal class RagEmbeddingSessionService(
         }
     }
 
+    suspend fun <T> withReleasedProvider(block: suspend () -> T): T = mutex.withLock {
+        check(!closed) { "Embedding service is closed." }
+        releaseActive()
+        block()
+    }
+
     suspend fun close() = mutex.withLock {
         closed = true
         releaseActive()

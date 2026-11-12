@@ -39,6 +39,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
@@ -133,6 +134,25 @@ class MainActivity : ComponentActivity() {
     private val catalogLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode != Activity.RESULT_OK) return@registerForActivityResult
+            result.data?.getStringExtra(ModelCatalogActivity.EXTRA_DELETE_MODEL_ID)?.let { id ->
+                val rag = ragViewModel.uiState.value
+                if (chatViewModel.chat.uiState.value.running || viewModel.uiState.value.isRunning ||
+                    testViewModel.uiState.value.isRunning || rag.isGenerating || rag.isIndexingDocument ||
+                    embeddingComparisonViewModel.state.value.busy || imageComparisonViewModel.state.value.busy) {
+                    android.widget.Toast.makeText(this, "Devam eden model işlemi bitince tekrar deneyin.", android.widget.Toast.LENGTH_LONG).show()
+                } else {
+                    generationModels.deleteModel(id) { block ->
+                        ragViewModel.withReleasedEmbedding {
+                            runtimeOwner.runtime.sessions.withColdRuntime {
+                                block()
+                                viewModel.onModelDeleted(id)
+                                ragViewModel.onModelDeleted(id)
+                            }
+                        }
+                    }
+                }
+                return@registerForActivityResult
+            }
             val selection = BenchmarkModelSelection.fromIntent(result.data) ?: return@registerForActivityResult
             viewModel.onCatalogModelSelected(selection)
         }
@@ -150,6 +170,11 @@ class MainActivity : ComponentActivity() {
             LLMTheme {
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
                 val generationModelState by generationModels.uiState.collectAsStateWithLifecycle()
+                LaunchedEffect(generationModelState.errorMessage) {
+                    generationModelState.errorMessage?.let { message ->
+                        android.widget.Toast.makeText(this@MainActivity, message, android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
                 val navController = rememberNavController()
                 val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
                 Scaffold(
@@ -167,7 +192,8 @@ class MainActivity : ComponentActivity() {
                             com.hilal.llm.chat.ChatRoute(chatViewModel, generationModels) {
                                 val rag = ragViewModel.uiState.value
                                 !viewModel.uiState.value.isRunning && !testViewModel.uiState.value.isRunning &&
-                                    !rag.isIndexingDocument && !rag.isGenerating && rag.pendingDownloadModelId == null
+                                    !rag.isIndexingDocument && !rag.isGenerating && rag.pendingDownloadModelId == null &&
+                                    !embeddingComparisonViewModel.state.value.busy && !imageComparisonViewModel.state.value.busy
                             }
                         }
                         composable(MainDestination.RUN.route) {

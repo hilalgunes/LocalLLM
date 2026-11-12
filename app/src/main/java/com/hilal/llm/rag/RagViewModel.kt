@@ -85,6 +85,16 @@ class RagViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    suspend fun withReleasedEmbedding(block: suspend () -> Unit) = embeddingService.withReleasedProvider(block)
+
+    fun onModelDeleted(id: String) {
+        _uiState.update { it.copy(
+            selectedGenerationModelId = it.selectedGenerationModelId?.takeUnless { selected -> selected == id },
+            selectedEmbeddingModelId = it.selectedEmbeddingModelId?.takeUnless { selected -> selected == id },
+            downloadStates = it.downloadStates + (id to DownloadState.Idle)
+        ) }
+    }
+
     fun loadModels() {
         val models = ModelCatalogRepository.getAvailableModels()
         val downloadStates = models.associate { model ->

@@ -164,3 +164,10 @@ iOS: derleme başarılı; iPhone 18 Pro / iOS 27 simülatöründe 20 test, 0 hat
 - Katalog seçimleri ekranların kendi ayarlarında kalır. Ortak depolama envanteri/ekran state’i ve tüm runtime sahiplerini kapsayan silme koordinasyonu henüz tamamlanmadığından model yönetimi üst maddesi açık kalır.
 - iOS ModelCacheStore actor önbellek tarama, boyut/boş alan hesaplama ve silme işlerini ana aktörden ayırır. Eski tarama yeni sonucu ezemez; silme diğer modelleri korur.
 - iOS: 35 simülatör testi başarılı. Android: 60 birim testi ve debug derlemesi başarılı; yanlış model amacı, eksik dosyalar, ortak kilit ve bekleyen işlemin iptali kapsandı.
+
+## Adım 3.2 — katalog silme koordinasyonu (12 Kasım 2026)
+
+- Android katalog ekranı model silme isteğini ana ekranın ortak model yöneticisine iletir. Doğrudan dosya silen eski katalog ViewModel yolu kaldırıldı.
+- Silme önce embedding sağlayıcısını ve üretim oturumunu bırakır; dosya işlemi tamamlanana kadar ilgili oturum kilitleri tutulur. Aktif sohbet, test, benchmark, RAG ve karşılaştırma sırasında istek reddedilir.
+- Silinen model benchmark/RAG seçimlerinden çıkarılır. Silme onayı ve yönetim hatalarının ana ekranda gösterimi eklendi.
+- Android debug derlemesi ve 61 birim testi başarılı. Yeni test dosya yönetimi bitmeden embedding sağlayıcısının yeniden açılmadığını doğrular.

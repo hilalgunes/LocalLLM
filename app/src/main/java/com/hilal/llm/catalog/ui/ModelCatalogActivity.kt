@@ -36,6 +36,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.material3.AlertDialog
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -50,6 +53,7 @@ import com.hilal.llm.catalog.download.DownloadState
 import com.hilal.llm.ui.theme.LLMTheme
 
 class ModelCatalogActivity : ComponentActivity() {
+    companion object { const val EXTRA_DELETE_MODEL_ID = "delete_model_id" }
     private val viewModel: ModelCatalogViewModel by viewModels {
         ModelCatalogViewModelFactory(application)
     }
@@ -62,6 +66,17 @@ class ModelCatalogActivity : ComponentActivity() {
             LLMTheme {
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
                 val snackbarHostState = remember { SnackbarHostState() }
+                var modelToDelete by remember { mutableStateOf<String?>(null) }
+                modelToDelete?.let { id ->
+                    AlertDialog(onDismissRequest = { modelToDelete = null },
+                        title = { Text("Model dosyaları silinsin mi?") },
+                        text = { Text("Modeli yeniden indirebilirsin. Sohbet ve belgelerin korunur.") },
+                        confirmButton = { TextButton(onClick = {
+                            setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_DELETE_MODEL_ID, id))
+                            finish()
+                        }) { Text("Sil") } },
+                        dismissButton = { TextButton(onClick = { modelToDelete = null }) { Text("Vazgeç") } })
+                }
 
                 LaunchedEffect(uiState.errorMessage) {
                     uiState.errorMessage?.let { snackbarHostState.showSnackbar(it) }
@@ -74,7 +89,7 @@ class ModelCatalogActivity : ComponentActivity() {
                         uiState = uiState,
                         onDownload = viewModel::downloadModel,
                         onCancelDownload = viewModel::cancelDownload,
-                        onDelete = viewModel::deleteModel,
+                        onDelete = { modelToDelete = it },
                         onRunBenchmark = { modelId ->
                             val selection = viewModel.createBenchmarkSelection(modelId)
                             if (selection != null) {

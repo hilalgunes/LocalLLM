@@ -82,24 +82,6 @@ class ModelCatalogViewModel(application: Application) : AndroidViewModel(applica
 
     fun cancelDownload(modelId: String) { downloadJobs[modelId]?.cancel() }
 
-    fun deleteModel(modelId: String) {
-        val model = ModelCatalogRepository.getModelById(modelId) ?: run {
-            _uiState.update { it.copy(errorMessage = "Model not found: $modelId") }
-            return
-        }
-
-        if (_uiState.value.isLoading) return
-        _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-        viewModelScope.launch {
-            try {
-                check(downloadRepository.deleteModel(model)) { "Unable to delete model: ${model.displayName}" }
-                _uiState.update { it.copy(downloadStates = it.downloadStates + (modelId to DownloadState.Idle)) }
-            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-            catch (failure: Exception) { _uiState.update { it.copy(errorMessage = failure.message) } }
-            finally { _uiState.update { it.copy(isLoading = false) } }
-        }
-    }
-
     fun isModelDownloaded(modelId: String): Boolean {
         val model = ModelCatalogRepository.getModelById(modelId) ?: return false
         return downloadRepository.isModelDownloaded(model)

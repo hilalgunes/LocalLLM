@@ -118,6 +118,15 @@ class BenchmarkViewModel : ViewModel() {
         }
     }
 
+    fun onModelDeleted(id: String) {
+        _uiState.update { it.copy(
+            selectedCatalogModel = it.selectedCatalogModel?.takeUnless { model -> model.modelId == id },
+            selectedModelConfig = it.selectedModelConfig?.takeUnless { model -> model.id == id },
+            selectedModel = if (it.selectedCatalogModel?.modelId == id) null else it.selectedModel,
+            modelDownloadStates = it.modelDownloadStates + (id to DownloadState.Idle)
+        ) }
+    }
+
     fun showModelPicker() {
         _uiState.update { it.copy(isModelPickerVisible = true, errorMessage = null) }
     }

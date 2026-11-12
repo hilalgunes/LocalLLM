@@ -44,6 +44,29 @@ class RagEmbeddingSessionServiceTest {
         assertTrue(provider.closed)
     }
 
+    @Test fun modelManagementHoldsProviderUntilFileMutationFinishes(): Unit = runBlocking {
+        val providers = mutableListOf<Provider>()
+        val service = RagEmbeddingSessionService { Provider().also(providers::add) }
+        service.embed("a", model, RagEmbeddingPurpose.QUERY)
+        val started = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<Unit>()
+        val management = launch {
+            service.withReleasedProvider {
+                assertTrue(providers.first().closed)
+                started.complete(Unit)
+                finish.await()
+            }
+        }
+        started.await()
+        val next = async(start = CoroutineStart.UNDISPATCHED) { service.embed("b", model, RagEmbeddingPurpose.QUERY) }
+        assertFalse(next.isCompleted)
+        assertEquals(1, providers.size)
+        finish.complete(Unit)
+        withTimeout(1000) { management.join(); next.await() }
+        assertEquals(2, providers.size)
+        service.close()
+    }
+
     @Test fun cancellationReleasesProviderAndAllowsRetry(): Unit = runBlocking {
         val started = CompletableDeferred<Unit>()
         val first = Provider().apply { operation = { started.complete(Unit); awaitCancellation() } }
