@@ -1,0 +1,406 @@
+{
+  "apk": "app/build/outputs/apk/debug/app-arm64-v8a-debug.apk",
+  "libraries": [
+    {
+      "library": "lib/arm64-v8a/libandroidx.graphics.path.so",
+      "loadSegments": [
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        }
+      ],
+      "zipAligned16k": true,
+      "elfAligned16k": true,
+      "compatibleAlignment": true
+    },
+    {
+      "library": "lib/arm64-v8a/libc++_shared.so",
+      "loadSegments": [
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        }
+      ],
+      "zipAligned16k": true,
+      "elfAligned16k": true,
+      "compatibleAlignment": true
+    },
+    {
+      "library": "lib/arm64-v8a/libexecutorch.so",
+      "loadSegments": [
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        }
+      ],
+      "zipAligned16k": true,
+      "elfAligned16k": true,
+      "compatibleAlignment": true
+    },
+    {
+      "library": "lib/arm64-v8a/libfbjni.so",
+      "loadSegments": [
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        }
+      ],
+      "zipAligned16k": true,
+      "elfAligned16k": true,
+      "compatibleAlignment": true
+    },
+    {
+      "library": "lib/arm64-v8a/libgecko_embedding_model_jni.so",
+      "loadSegments": [
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        }
+      ],
+      "zipAligned16k": true,
+      "elfAligned16k": true,
+      "compatibleAlignment": true
+    },
+    {
+      "library": "lib/arm64-v8a/liblitertlm_jni.so",
+      "loadSegments": [
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        }
+      ],
+      "zipAligned16k": true,
+      "elfAligned16k": true,
+      "compatibleAlignment": true
+    },
+    {
+      "library": "lib/arm64-v8a/libmat.so",
+      "loadSegments": [
+        {
+          "alignment": 4096,
+          "congruent16k": true
+        },
+        {
+          "alignment": 4096,
+          "congruent16k": false
+        },
+        {
+          "alignment": 4096,
+          "congruent16k": false
+        }
+      ],
+      "zipAligned16k": true,
+      "elfAligned16k": false,
+      "compatibleAlignment": false
+    },
+    {
+      "library": "lib/arm64-v8a/libonnxruntime-genai-jni.so",
+      "loadSegments": [
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        }
+      ],
+      "zipAligned16k": true,
+      "elfAligned16k": true,
+      "compatibleAlignment": true
+    },
+    {
+      "library": "lib/arm64-v8a/libonnxruntime-genai.so",
+      "loadSegments": [
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        }
+      ],
+      "zipAligned16k": true,
+      "elfAligned16k": true,
+      "compatibleAlignment": true
+    },
+    {
+      "library": "lib/arm64-v8a/libonnxruntime.so",
+      "loadSegments": [
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        }
+      ],
+      "zipAligned16k": true,
+      "elfAligned16k": true,
+      "compatibleAlignment": true
+    },
+    {
+      "library": "lib/arm64-v8a/libonnxruntime4j_jni.so",
+      "loadSegments": [
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        }
+      ],
+      "zipAligned16k": true,
+      "elfAligned16k": true,
+      "compatibleAlignment": true
+    },
+    {
+      "library": "lib/arm64-v8a/librnllama.so",
+      "loadSegments": [
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        }
+      ],
+      "zipAligned16k": true,
+      "elfAligned16k": true,
+      "compatibleAlignment": true
+    },
+    {
+      "library": "lib/arm64-v8a/librnllama_v8.so",
+      "loadSegments": [
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        }
+      ],
+      "zipAligned16k": true,
+      "elfAligned16k": true,
+      "compatibleAlignment": true
+    },
+    {
+      "library": "lib/arm64-v8a/librnllama_v8_2.so",
+      "loadSegments": [
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        }
+      ],
+      "zipAligned16k": true,
+      "elfAligned16k": true,
+      "compatibleAlignment": true
+    },
+    {
+      "library": "lib/arm64-v8a/librnllama_v8_2_dotprod.so",
+      "loadSegments": [
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        }
+      ],
+      "zipAligned16k": true,
+      "elfAligned16k": true,
+      "compatibleAlignment": true
+    },
+    {
+      "library": "lib/arm64-v8a/librnllama_v8_2_dotprod_i8mm.so",
+      "loadSegments": [
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        }
+      ],
+      "zipAligned16k": true,
+      "elfAligned16k": true,
+      "compatibleAlignment": true
+    },
+    {
+      "library": "lib/arm64-v8a/librnllama_v8_2_i8mm.so",
+      "loadSegments": [
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        }
+      ],
+      "zipAligned16k": true,
+      "elfAligned16k": true,
+      "compatibleAlignment": true
+    },
+    {
+      "library": "lib/arm64-v8a/libsqlite_vector_store_jni.so",
+      "loadSegments": [
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        }
+      ],
+      "zipAligned16k": true,
+      "elfAligned16k": true,
+      "compatibleAlignment": true
+    },
+    {
+      "library": "lib/arm64-v8a/libtext_chunker_jni.so",
+      "loadSegments": [
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        }
+      ],
+      "zipAligned16k": true,
+      "elfAligned16k": true,
+      "compatibleAlignment": true
+    },
+    {
+      "library": "lib/arm64-v8a/librag_sqlitevec.so",
+      "loadSegments": [
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        },
+        {
+          "alignment": 16384,
+          "congruent16k": true
+        }
+      ],
+      "zipAligned16k": true,
+      "elfAligned16k": true,
+      "compatibleAlignment": true
+    }
+  ],
+  "allAligned16k": false
+}

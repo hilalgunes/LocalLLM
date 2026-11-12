@@ -198,3 +198,9 @@ iOS: derleme başarılı; iPhone 18 Pro / iOS 27 simülatöründe 20 test, 0 hat
 - Ortak v1 üretim deney şeması `deney-kayit-sozlesmesi.md` içinde tanımlıdır. Model sürümü bilinmiyorsa boş bırakılır. Chunking/top-k alanları bu üretim deneyinde uygulanmaz; mevcut embedding ve eski benchmark raporlarının bu formata taşınması açık kalır.
 - Soğuk oturum yeniden açılır; ısıtılmış ölçümden önce kayıt dışı bir hazırlık yanıtı üretilir. Android warm yalnızca LiteRT için; iOS deneyleri MLX için açıktır. Hazırlık, üretim ve ilk metin süreleri ayrıdır; hazırlık saf model yüklemesi diye sunulmaz.
 - Android 67 birim testi, debug derlemesi ve Samsung SM-N975F ile Pixel 10 Pro’da ikişer gezinme testi geçti. iOS 40 simülatör testi ve cihaz hedefi derlemesi geçti. Bu kayıttaki testler gerçek model performansı ölçümü değildir.
+
+## Adım 3.4 — native sayfa hizalaması (12 Kasım 2026)
+
+- Kendi SQLite/vektör JNI kütüphanemizin NDK 27 derlemesi 16 KB hizalamaya taşındı. APK için tekrarlanabilir ELF/ZIP denetim aracı ve sonuç raporu eklendi.
+- 20 arm64 kütüphaneden 19'u kontrolü geçti; ONNX GenAI 0.15.2 paketindeki libmat.so hâlâ uyumsuz. Bu nedenle tam native uyumluluk maddesi açık.
+- Debug derlemesi, üç araç testi ve Samsung/Pixel üzerinde kalıcı vektör testi geçti. Gerçek model bellek/üretim ölçümü yapılmadı.

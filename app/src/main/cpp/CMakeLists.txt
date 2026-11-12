@@ -24,3 +24,9 @@ target_link_libraries(rag_sqlitevec
     ${log-lib}
     ${dl-lib}
 )
+
+# NDK r27: align our JNI library for both 4 KB and 16 KB Android devices.
+target_link_options(rag_sqlitevec PRIVATE
+    "-Wl,-z,max-page-size=16384"
+    "-Wl,-z,common-page-size=16384"
+)
